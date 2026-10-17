@@ -22,7 +22,7 @@ S-CLEAN, IN SYNC.
 - **LISTEN / LOOP** : écoute de la montée et du début de la voix, DAW à l'arrêt.
 - Le fichier glissé : WAV 24 bits stéréo dans le dossier temporaire « ONIRIQUE RISER », nommé avec la mesure et le temps.
 
-Licence ONIRIQUE (identifiant `onirique-riser`), presets d'usine + utilisateur (%APPDATA%/Onirique/Riser/Presets, *.orsrpreset).
+Gratuit : aucun système de licence. Presets d'usine + utilisateur (%APPDATA%/Onirique/Riser/Presets, *.orsrpreset).
 
 ## Générer le .vst3 (Windows)
     build_windows.bat
@@ -30,5 +30,4 @@ Licence ONIRIQUE (identifiant `onirique-riser`), presets d'usine + utilisateur (
 Mac : `./build_mac.sh`. Chaque envoi sur main lance `.github/workflows/build.yml` (Mac universel VST3 + AU, Windows), puis
 publie dans ONIRIQUE CENTRAL ; le message du commit devient la note de version.
 
-Captures locales : compiler avec `/DONIRIQUE_UI_TEST=1` (jamais dans les versions publiées) ; `ONIRIQUE_UI_TEST=nolicense`
-(sans page d'activation), `demo` (une prise de synthèse), `edit` (panneau EDIT ouvert).
+Captures locales : compiler avec `/DONIRIQUE_UI_TEST=1` (jamais dans les versions publiées) ; `ONIRIQUE_UI_TEST=demo` (une prise de synthèse), `edit` (panneau EDIT ouvert).

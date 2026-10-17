@@ -106,7 +106,5 @@ private:
     juce::String shownLength;
     bool restoringSize = true;
 
-    std::unique_ptr<onirique::license::Overlay> licenseOverlay;
-
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OniriqueRiserAudioProcessorEditor)
 };

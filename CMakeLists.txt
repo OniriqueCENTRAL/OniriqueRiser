@@ -60,10 +60,6 @@ juce_add_binary_data(OniriqueAssets SOURCES Resources/logo.png)
 
 target_include_directories(OniriqueRiser PRIVATE Source)
 
-# Licence ONIRIQUE : vérification du fichier écrit par ONIRIQUE CENTRAL, pastille et page d'activation.
-include(License/OniriqueLicense.cmake)
-onirique_add_license(OniriqueRiser)
-
 target_compile_definitions(OniriqueRiser PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

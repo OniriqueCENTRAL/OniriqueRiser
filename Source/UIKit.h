@@ -1,6 +1,5 @@
 #pragma once
 
-#include "License/LicenseOverlay.h"
 #include "PresetManager.h"
 
 #include <array>

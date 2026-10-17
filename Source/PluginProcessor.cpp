@@ -85,7 +85,6 @@ bool OniriqueRiserAudioProcessor::isBusesLayoutSupported (const BusesLayout& lay
 
 void OniriqueRiserAudioProcessor::prepareToPlay (double sr, int)
 {
-    license.refresh();
     rate = sr;
     preroll.setSize (2, (int) (kPreroll * sr) + 1);
     rec.setSize (2, (int) ((kPreroll + kMaxTake) * sr));
@@ -254,7 +253,6 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     float pk = 0.0f;
     for (int c = 0; c < numCh; ++c) pk = std::max (pk, buffer.getMagnitude (c, 0, n));
     if (pk > level.load (std::memory_order_relaxed)) level.store (pk, std::memory_order_relaxed);
-    license.process (buffer, getSampleRate(), isNonRealtime());
 }
 
 RiserSettings OniriqueRiserAudioProcessor::readSettings() const

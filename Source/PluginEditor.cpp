@@ -378,14 +378,11 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
     restoringSize = false;
     onirique::window::remember (processor.apvts.state, getWidth(), getHeight());
 
-    licenseOverlay = std::make_unique<onirique::license::Overlay> ("ONIRIQUE RISER", processor.license);
-    addAndMakeVisible (*licenseOverlay);
     resized();
    #if ONIRIQUE_UI_TEST
     // essais locaux uniquement (jamais dans les versions publiées)
     {
         const auto t = juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_TEST", {});
-        if (t.contains ("nolicense")) licenseOverlay->setVisible (false);
         if (t.contains ("demo")) processor.loadTestTake();
         if (t.contains ("edit")) { display.setEditing (true); showEdit (true); }
     }
@@ -440,12 +437,9 @@ void OniriqueRiserAudioProcessorEditor::resized()
     const float u = scale();
     const float W = (float) getWidth();
 
-    // ---- en-tête : logo, presets, licence
+    // ---- en-tête : logo, presets
     logoRect = { 16.0f * u, 12.0f * u, 30.0f * u * 985.0f / 895.0f, 30.0f * u };
-    const float badgeW = licenseOverlay != nullptr ? (float) licenseOverlay->pillWidth() : 0.0f;
-    if (licenseOverlay != nullptr)
-        licenseOverlay->fit (getLocalBounds(), u, juce::Rectangle<float> (kBaseW - 14.0f - badgeW, 10.0f, badgeW, 34.0f).toNearestInt());
-    presetBar.setBounds (juce::Rectangle<float> (250.0f * u, 34.0f * u).withCentre ({ W * 0.5f - 20.0f * u, 27.0f * u }).toNearestInt());
+    presetBar.setBounds (juce::Rectangle<float> (250.0f * u, 34.0f * u).withCentre ({ W * 0.5f, 27.0f * u }).toNearestInt());
 
     // ---- la carte : le panneau de la montée, le grand bouton, les effets
     cardRect = { 12.0f * u, 54.0f * u, W - 24.0f * u, (float) getHeight() - 66.0f * u };

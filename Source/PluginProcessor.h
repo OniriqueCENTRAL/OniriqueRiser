@@ -3,7 +3,6 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_dsp/juce_dsp.h>
 
-#include "License/LicenseGuard.h"
 #include "Parameters.h"
 #include "PresetManager.h"
 #include "DSP/RiserEngine.h"
@@ -51,9 +50,6 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
     onirique::PresetManager presets { apvts };
-
-    /** Licence ONIRIQUE (acheté, essai, démo) : voir License/LicenseGuard.h. */
-    onirique::license::Guard license { "onirique-riser" };
 
     //==============================================================================
     // Pour l'interface (thread de l'interface)
