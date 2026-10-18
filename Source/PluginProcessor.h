@@ -62,7 +62,7 @@ public:
     juce::File exportRiser (juce::String& error);
     void setListen (bool on);
     bool isListening() const noexcept { return listenOn.load(); }
-    double listenPosition() const noexcept { return listenPos.load(); }   // 0..1 : montée, puis la voix
+    double listenPosition() const noexcept { return listenPos.load(); }   // 0..1 : position dans la montée
     std::atomic<bool> loop { false };
     float consumeLevel() noexcept { return level.exchange (0.0f); }
     double hostBpm() const noexcept { return bpmNow.load(); }

@@ -22,9 +22,9 @@ public:
     void setEditing (bool e) { editing = e; repaint(); }
 
 private:
-    enum Zone { none = -1, zListen, zLoop, zEdit, zPrev, zNext, zWave };
+    enum Zone { none = -1, zListen, zLoop, zEdit, zRaw, zPrev, zNext, zWave };
     Zone zoneAt (juce::Point<float>) const;
-    juce::Rectangle<float> waveArea() const, listenZone() const, loopZone() const, editZone() const, prevZone() const, nextZone() const;
+    juce::Rectangle<float> waveArea() const, listenZone() const, loopZone() const, editZone() const, rawZone() const, prevZone() const, nextZone() const;
 
     OniriqueRiserAudioProcessor& processor;
     std::shared_ptr<const onirique::RiserResult> shown;
@@ -38,16 +38,64 @@ private:
     int frames = 0;
 };
 
-// Effet en un clic (PHONE, CHORUS...) : pictogramme marche / arrêt + nom, braise quand il est allumé.
+// Effet en un clic (PHONE, CHORUS...) : le pictogramme marche / arrêt allume ou coupe l'effet ; un clic sur le NOM ouvre
+// son menu de réglages (onText). Braise quand il est allumé.
 class FxToggle : public juce::ToggleButton, public Animated
 {
 public:
     explicit FxToggle (const juce::String& name) : juce::ToggleButton (name) { setClickingTogglesState (true); }
     void paintButton (juce::Graphics&, bool highlighted, bool down) override;
     void tick() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    std::function<void()> onText;
+    void setMenuOpen (bool o) { if (o != menuOpen) { menuOpen = o; repaint(); } }
 
 private:
-    float on = 0.0f, hov = 0.0f;
+    float on = 0.0f, hov = 0.0f, iconRight = 0.0f;
+    bool textClick = false, menuOpen = false;
+};
+
+// Curseur du menu d'un effet : NOM  valeur, au-dessus d'une piste braise et d'un bouton sombre (glisser, cliquer sur la
+// piste, molette, double-clic = défaut).
+class FxSlider : public juce::Component, public Animated
+{
+public:
+    FxSlider (juce::AudioProcessorValueTreeState&, const char* paramId, const juce::String& name);
+    void paint (juce::Graphics&) override;
+    void tick() override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+
+private:
+    juce::Rectangle<float> track() const;
+    void setFromX (float x);
+    juce::RangedAudioParameter* param = nullptr;
+    std::unique_ptr<juce::ParameterAttachment> attachment;
+    juce::String name, shownText;
+    float shown = -1.0f, glow = 0.0f;
+    bool dragging = false;
+};
+
+// Menu d'un effet : une petite carte au-dessus de son nom, avec ses deux réglages (MIX + un réglage propre).
+class FxMenu : public juce::Component, public Animated
+{
+public:
+    explicit FxMenu (juce::AudioProcessorValueTreeState&);
+    void showFor (int effect, juce::Rectangle<int> anchor);   // effect : 0 PHONE, 1 CHORUS, 2 TREMOLO, 3 SWEEP, 4 WIDE ; -1 = fermer
+    int current() const noexcept { return effect; }
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void tick() override;
+
+private:
+    std::array<std::unique_ptr<FxSlider>, 10> sliders;   // deux par effet
+    int effect = -1;
+    float shown = 0.0f;
 };
 
 class OniriqueRiserAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -66,6 +114,7 @@ private:
     void timerCallback() override;
     float scale() const noexcept { return (float) getWidth() / onirique::ui::kEditorBaseW; }
     void showEdit (bool);
+    void mouseDown (const juce::MouseEvent&) override;   // un clic ailleurs ferme le menu d'un effet
 
     OniriqueRiserAudioProcessor& processor;
     OniriqueLookAndFeel lnf;
@@ -95,6 +144,7 @@ private:
     KnobComponent gainKnob   { processor.apvts, onirique::ids::gain, "GAIN", "-24", "+6", Layout::textBelow,
                                "Level of the riser file (normalised to -1 dBFS first).", lnf, true };
     FxToggle sClean { "S-CLEAN" }, inSync { "IN SYNC" };
+    FxMenu fxMenu { processor.apvts };   // réglages d'un effet (clic sur son nom)
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;
     float editAmt = 0.0f;
 

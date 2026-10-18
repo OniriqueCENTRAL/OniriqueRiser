@@ -131,8 +131,8 @@ private:
         std::vector<juce::RangedAudioParameter*> v;
         for (auto* p : apvts.processor.getParameters())
             if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (p))
-                if (const auto id = r->getParameterID(); id != ids::bypass && id != ids::phrase && id != ids::inSync)
-                    v.push_back (r);   // réglages de session exclus : bypass, phrase choisie, IN SYNC
+                if (const auto id = r->getParameterID(); id != ids::bypass && id != ids::phrase && id != ids::inSync && id != ids::raw)
+                    v.push_back (r);   // réglages de session exclus : bypass, phrase choisie, IN SYNC, RAW
         return v;
     }
 

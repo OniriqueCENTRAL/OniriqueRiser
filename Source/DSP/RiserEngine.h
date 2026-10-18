@@ -49,6 +49,11 @@ struct RiserSettings
     float curve = 0.0f;               // 0..1 : la montée se creuse (arrive plus tard, plus fort)
     float gainDb = 0.0f;
     bool sClean = true, phone = false, chorus = false, tremolo = false, sweep = false, wide = false;
+    // réglages des effets (0..1, sauf la cadence du trémolo : 0 1/4, 1 1/8, 2 1/16, 3 1/32 ; le départ du SWEEP en Hz)
+    float phoneMix = 1.0f, phoneDrive = 0.5f, chorusMix = 1.0f, chorusDepth = 0.65f, tremoloMix = 1.0f, sweepMix = 1.0f, sweepStart = 300.0f,
+          wideMix = 1.0f, wideWidth = 0.9f;
+    int tremoloRate = 2;
+    bool raw = false;   // RAW : la reverse reverb seule (ni effets, ni CURVE)
     int phrase = 0;
 };
 
@@ -219,8 +224,9 @@ public:
                 riser.setSample (c, i, m >= 0 ? wet.getSample (c, L - 1 - m) : 0.0f);
             }
 
-        // ---- 4. couleur et forme
-        colour (riser, fs, beatSec, st);
+        // ---- 4. couleur et forme (RAW : la reverse reverb telle quelle)
+        if (! st.raw) colour (riser, fs, beatSec, st);
+        else colourRaw (riser, fs);
 
         float pk = 0.0f;
         for (int c = 0; c < 2; ++c) pk = std::max (pk, riser.getMagnitude (c, 0, R));
@@ -314,74 +320,104 @@ private:
         }
     }
 
+    // un effet sur une copie, puis mélangé au signal selon son MIX
+    template <typename Fn>
+    static void withMix (juce::AudioBuffer<float>& r, float mix, Fn&& effect)
+    {
+        mix = juce::jlimit (0.0f, 1.0f, mix);
+        if (mix <= 0.0f) return;
+        juce::AudioBuffer<float> wet (r);
+        effect (wet);
+        const int R = r.getNumSamples();
+        for (int c = 0; c < 2; ++c)
+        {
+            float* d = r.getWritePointer (c);
+            const float* w = wet.getReadPointer (c);
+            for (int i = 0; i < R; ++i) d[i] += mix * (w[i] - d[i]);
+        }
+    }
+
     static void colour (juce::AudioBuffer<float>& r, double fs, double beatSec, const RiserSettings& st)
     {
         const int R = r.getNumSamples();
-        float* ch[2] { r.getWritePointer (0), r.getWritePointer (1) };
 
-        if (st.sweep)   // filtre passe-bas qui s'ouvre de 300 Hz à 18 kHz au fil de la montée
-        {
-            Biquad lp;
-            for (int i = 0; i < R; ++i)
+        if (st.sweep)   // filtre passe-bas qui s'ouvre de START jusqu'à 18 kHz au fil de la montée
+            withMix (r, st.sweepMix, [&] (juce::AudioBuffer<float>& w)
             {
-                if ((i & 31) == 0)
+                float* ch[2] { w.getWritePointer (0), w.getWritePointer (1) };
+                const double f0 = juce::jlimit (40.0, 4000.0, (double) st.sweepStart), f1 = std::min (18000.0, 0.45 * fs);
+                Biquad lp;
+                for (int i = 0; i < R; ++i)
                 {
-                    const double t = (double) i / R;
-                    lp.setCoeffs (BiquadCoeffs::lowpass (fs, std::min (0.45 * fs, 300.0 * std::pow (60.0, t)), 0.9));
+                    if ((i & 31) == 0) lp.setCoeffs (BiquadCoeffs::lowpass (fs, f0 * std::pow (f1 / f0, (double) i / R), 0.9));
+                    for (int c = 0; c < 2; ++c) ch[c][i] = lp.process (ch[c][i], c);
                 }
-                for (int c = 0; c < 2; ++c) ch[c][i] = lp.process (ch[c][i], c);
-            }
-        }
-        if (st.phone)   // téléphone : 450 Hz - 3.2 kHz, un peu de grain
-        {
-            Biquad a, b, c2, d;
-            a.setCoeffs (BiquadCoeffs::highpass (fs, 450.0, 0.707)); b.setCoeffs (BiquadCoeffs::highpass (fs, 450.0, 0.707));
-            c2.setCoeffs (BiquadCoeffs::lowpass (fs, 3200.0, 0.707)); d.setCoeffs (BiquadCoeffs::lowpass (fs, 3200.0, 0.707));
-            for (int i = 0; i < R; ++i)
-                for (int c = 0; c < 2; ++c)
-                {
-                    float x = d.process (c2.process (b.process (a.process (ch[c][i], c), c), c), c);
-                    x = std::tanh (2.5f * x * 4.0f) * 0.25f;
-                    ch[c][i] = x;
-                }
-        }
+            });
+        if (st.phone)   // téléphone : 450 Hz - 3.2 kHz, du grain selon DRIVE
+            withMix (r, st.phoneMix, [&] (juce::AudioBuffer<float>& w)
+            {
+                float* ch[2] { w.getWritePointer (0), w.getWritePointer (1) };
+                Biquad a, b, c2, d;
+                a.setCoeffs (BiquadCoeffs::highpass (fs, 450.0, 0.707)); b.setCoeffs (BiquadCoeffs::highpass (fs, 450.0, 0.707));
+                c2.setCoeffs (BiquadCoeffs::lowpass (fs, 3200.0, 0.707)); d.setCoeffs (BiquadCoeffs::lowpass (fs, 3200.0, 0.707));
+                const float drive = 1.0f + 19.0f * juce::jlimit (0.0f, 1.0f, st.phoneDrive);
+                for (int i = 0; i < R; ++i)
+                    for (int c = 0; c < 2; ++c)
+                        ch[c][i] = std::tanh (drive * d.process (c2.process (b.process (a.process (ch[c][i], c), c), c), c)) / std::sqrt (drive);
+            });
         if (st.chorus)
-        {
-            fx::Chorus co;
-            co.prepare (fs);
-            co.set (true, 0.7f, 0.65f, 0.5f);
-            for (int pos = 0; pos < R; pos += 512)
+            withMix (r, st.chorusMix, [&] (juce::AudioBuffer<float>& w)
             {
-                const int m = juce::jmin (512, R - pos);
-                float* p[2] { ch[0] + pos, ch[1] + pos };
-                co.process (p, 2, m);
-            }
-        }
-        if (st.tremolo)   // doubles-croches au tempo, forme douce
-        {
-            const double period = beatSec / 4.0;
-            for (int i = 0; i < R; ++i)
+                fx::Chorus co;
+                co.prepare (fs);
+                co.set (true, 0.7f, juce::jlimit (0.0f, 1.0f, st.chorusDepth), 1.0f);
+                for (int pos = 0; pos < R; pos += 512)
+                {
+                    const int m = juce::jmin (512, R - pos);
+                    float* p[2] { w.getWritePointer (0, pos), w.getWritePointer (1, pos) };
+                    co.process (p, 2, m);
+                }
+            });
+        if (st.tremolo)   // au tempo (TIMING), calé sur la fin (la voix) ; MIX = profondeur
+            withMix (r, st.tremoloMix, [&] (juce::AudioBuffer<float>& w)
             {
-                const double ph = std::fmod ((double) (R - i) / fs, period) / period;   // calé sur la fin (la voix)
-                const float g = 1.0f - 0.75f * (float) (0.5 - 0.5 * std::cos (2.0 * juce::MathConstants<double>::pi * ph));
-                for (int c = 0; c < 2; ++c) ch[c][i] *= g;
-            }
-        }
-        if (st.wide)   // élargissement : côtés renforcés
-            for (int i = 0; i < R; ++i)
+                float* ch[2] { w.getWritePointer (0), w.getWritePointer (1) };
+                const double period = beatSec / (double) (1 << juce::jlimit (0, 3, st.tremoloRate));
+                for (int i = 0; i < R; ++i)
+                {
+                    const double ph = std::fmod ((double) (R - i) / fs, period) / period;
+                    const float g = 1.0f - (float) (0.5 - 0.5 * std::cos (2.0 * juce::MathConstants<double>::pi * ph));
+                    for (int c = 0; c < 2; ++c) ch[c][i] *= g;
+                }
+            });
+        if (st.wide)   // élargissement : côtés renforcés selon WIDTH
+            withMix (r, st.wideMix, [&] (juce::AudioBuffer<float>& w)
             {
-                const float m = 0.5f * (ch[0][i] + ch[1][i]), s = 0.5f * (ch[0][i] - ch[1][i]) * 1.9f;
-                ch[0][i] = m + s; ch[1][i] = m - s;
-            }
+                float* ch[2] { w.getWritePointer (0), w.getWritePointer (1) };
+                const float k = 1.0f + juce::jlimit (0.0f, 1.0f, st.wideWidth);
+                for (int i = 0; i < R; ++i)
+                {
+                    const float m = 0.5f * (ch[0][i] + ch[1][i]), s = 0.5f * (ch[0][i] - ch[1][i]) * k;
+                    ch[0][i] = m + s; ch[1][i] = m - s;
+                }
+            });
 
         // forme : CURVE creuse le début ; fondu d'entrée de 30 ms (rien ne claque au début du fichier)
-        const float p = 1.0f + 3.0f * juce::jlimit (0.0f, 1.0f, st.curve);
+        shape (r, fs, 1.0f + 3.0f * juce::jlimit (0.0f, 1.0f, st.curve));
+    }
+
+    // RAW : la reverse reverb seule, avec seulement le fondu d'entrée
+    static void colourRaw (juce::AudioBuffer<float>& r, double fs) { shape (r, fs, 1.0f); }
+
+    static void shape (juce::AudioBuffer<float>& r, double fs, float p)
+    {
+        const int R = r.getNumSamples();
         const int fi = juce::jmin (R / 4, (int) (0.030 * fs));
         for (int i = 0; i < R; ++i)
         {
             float g = p > 1.001f ? std::pow ((float) (i + 1) / (float) R, p - 1.0f) : 1.0f;
             if (i < fi) g *= (float) i / (float) fi;
-            for (int c = 0; c < 2; ++c) ch[c][i] *= g;
+            for (int c = 0; c < 2; ++c) r.setSample (c, i, r.getSample (c, i) * g);
         }
     }
 };

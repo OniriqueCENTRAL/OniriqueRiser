@@ -4,9 +4,10 @@ Montées de reverb inversée ("reverse reverb") pour la voix, en un geste : pos�
 voix tout seul quand on lance la lecture du DAW ; à l'arrêt, la montée est prête. On attrape la forme d'onde et on la
 glisse dans le DAW, sur la mesure indiquée : elle finit exactement là où la voix commence.
 
-Petite interface carrée (560 x 560, redimensionnable) : panneau de la montée (forme d'onde à glisser, LISTEN, LOOP, EDIT,
+Petite interface carrée (560 x 560, redimensionnable) : panneau de la montée (forme d'onde à glisser, LISTEN, LOOP, RAW, EDIT,
 choix de la phrase), grand bouton REVERSE (1 temps, 2 temps, 1 mesure, 2 mesures, 4 mesures, au tempo du DAW), effets en un
-clic : PHONE, CHORUS, TREMOLO, SWEEP, WIDE. EDIT : SPACE (ROOM, PLATE, DARK, HALL, SHIMMER), SOURCE, SIZE, CURVE, GAIN,
+clic : PHONE, CHORUS, TREMOLO, SWEEP, WIDE. Clic sur le nom d'un effet : son menu (MIX + DRIVE, DEPTH, TIMING, START ou WIDTH). RAW :
+la reverse reverb seule, sans effets. LISTEN : la montée seule. EDIT : SPACE (ROOM, PLATE, DARK, HALL, SHIMMER), SOURCE, SIZE, CURVE, GAIN,
 S-CLEAN, IN SYNC.
 
 ## Fonctionnement

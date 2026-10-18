@@ -47,6 +47,12 @@ juce::Rectangle<float> RiserDisplay::editZone() const
     const float u = ui::editorScale (*this);
     return { (float) getWidth() - 16.0f * u - 54.0f * u, (float) getHeight() - 34.0f * u, 54.0f * u, 24.0f * u };
 }
+// RAW : juste à gauche d'EDIT
+juce::Rectangle<float> RiserDisplay::rawZone() const
+{
+    const float u = ui::editorScale (*this);
+    return editZone().translated (-50.0f * u, 0.0f).withWidth (42.0f * u);
+}
 juce::Rectangle<float> RiserDisplay::prevZone() const
 {
     const float u = ui::editorScale (*this);
@@ -64,6 +70,7 @@ RiserDisplay::Zone RiserDisplay::zoneAt (juce::Point<float> p) const
     if (listenZone().contains (p)) return zListen;
     if (loopZone().contains (p)) return zLoop;
     if (editZone().contains (p)) return zEdit;
+    if (rawZone().contains (p)) return zRaw;
     if (many && prevZone().contains (p)) return zPrev;
     if (many && nextZone().contains (p)) return zNext;
     if (waveArea().expanded (8.0f).contains (p)) return zWave;
@@ -98,6 +105,10 @@ void RiserDisplay::mouseDown (const juce::MouseEvent& e)
         case zListen: processor.setListen (! processor.isListening()); break;
         case zLoop:  looping = ! looping; processor.loop = looping; repaint(); break;
         case zEdit:   editing = ! editing; if (onEdit) onEdit (editing); repaint(); break;
+        case zRaw:
+            if (auto* p = processor.apvts.getParameter (ids::raw))
+            { p->beginChangeGesture(); p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f); p->endChangeGesture(); repaint(); }
+            break;
         case zPrev:   setPhrase (-1); break;
         case zNext:   setPhrase (1); break;
         case zWave: case none: default: break;
@@ -209,7 +220,7 @@ void RiserDisplay::paint (juce::Graphics& g)
             const float t = (float) b / (float) (bars - 1);
             const float h = std::max (1.5f * u, juce::jmin (1.0f, m / pk) * half * appear);
             const float x = wa.getX() + step * ((float) b + 0.5f);
-            const bool played = listen >= 0.0 && listen * (shown->riserSamples + shown->voiceAfter.getNumSamples()) / shown->riserSamples >= t;
+            const bool played = listen >= 0.0 && listen >= t;
             auto col = ui::haze.withAlpha (0.35f).interpolatedWith (ui::ember, 0.25f + 0.75f * t).interpolatedWith (ui::bone, 0.25f * grab * t);
             if (played) col = ui::bone;
             // lueur animée : une vague de lumière qui remonte vers la voix (plus vive quand on attrape la montée)
@@ -285,6 +296,7 @@ void RiserDisplay::paint (juce::Graphics& g)
     textButton (listenZone(), "LISTEN", listen >= 0.0, hover == zListen, 0);
     textButton (loopZone(), "LOOP", looping, hover == zLoop, 1);
     textButton (editZone(), "EDIT", editing, hover == zEdit, -1);
+    textButton (rawZone(), "RAW", processor.apvts.getRawParameterValue (ids::raw)->load() > 0.5f, hover == zRaw, -1);
 }
 
 //==============================================================================
@@ -313,10 +325,206 @@ void FxToggle::paintButton (juce::Graphics& g, bool, bool)
                                                  ui::ember.withAlpha (0.0f), icR.getCentreX() + h * 0.5f, icR.getCentreY(), true));
         g.fillEllipse (icR.withSizeKeepingCentre (h * 0.98f, h * 0.98f));
     }
+    iconRight = icR.getRight() + 3.0f * u;   // à droite : le nom (ouvre le menu)
     iconPower (g, icR, col, std::max (1.2f, 1.6f * u));
     g.setColour (col);
     g.setFont (f);
     g.drawText (getButtonText(), juce::Rectangle<float> (x0 + ic + 5.0f * u, b.getY(), tw + 4.0f, h), juce::Justification::centredLeft, false);
+    if (menuOpen)   // menu ouvert : le nom est souligné
+        g.fillRoundedRectangle (juce::Rectangle<float> (x0 + ic + 5.0f * u, b.getCentreY() + h * 0.30f, tw, std::max (1.0f, 1.4f * u)), 0.7f * u);
+}
+
+// clic sur le nom : le menu de l'effet (le pictogramme, lui, allume / coupe)
+void FxToggle::mouseDown (const juce::MouseEvent& e)
+{
+    textClick = onText != nullptr && e.position.x > iconRight;
+    if (! textClick) juce::ToggleButton::mouseDown (e);
+}
+
+void FxToggle::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! textClick) juce::ToggleButton::mouseDrag (e);
+}
+
+void FxToggle::mouseUp (const juce::MouseEvent& e)
+{
+    if (textClick)
+    {
+        textClick = false;
+        if (onText != nullptr && getLocalBounds().contains (e.getPosition())) onText();
+        return;
+    }
+    juce::ToggleButton::mouseUp (e);
+}
+
+//==============================================================================
+FxSlider::FxSlider (juce::AudioProcessorValueTreeState& s, const char* paramId, const juce::String& n)
+    : param (s.getParameter (paramId)), name (n)
+{
+    if (param != nullptr)
+    {
+        attachment = std::make_unique<juce::ParameterAttachment> (*param, [this] (float) { repaint(); }, nullptr);
+        attachment->sendInitialUpdate();
+    }
+    setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+}
+
+juce::Rectangle<float> FxSlider::track() const
+{
+    const auto b = getLocalBounds().toFloat();
+    const float h = b.getHeight();
+    return { b.getX() + h * 0.22f, b.getY() + h * 0.68f, b.getWidth() - h * 0.44f, 0.0f };
+}
+
+void FxSlider::setFromX (float x)
+{
+    const auto t = track();
+    const float norm = juce::jlimit (0.0f, 1.0f, (x - t.getX()) / std::max (1.0f, t.getWidth()));
+    attachment->setValueAsPartOfGesture (param->convertFrom0to1 (norm));
+}
+
+void FxSlider::mouseDown (const juce::MouseEvent& e)
+{
+    if (param == nullptr) return;
+    dragging = true;
+    attachment->beginGesture();
+    setFromX (e.position.x);
+}
+
+void FxSlider::mouseDrag (const juce::MouseEvent& e) { if (param != nullptr && dragging) setFromX (e.position.x); }
+
+void FxSlider::mouseUp (const juce::MouseEvent&)
+{
+    if (param == nullptr || ! dragging) return;
+    dragging = false;
+    attachment->endGesture();
+}
+
+void FxSlider::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (param != nullptr) attachment->setValueAsCompleteGesture (param->convertFrom0to1 (param->getDefaultValue()));
+}
+
+void FxSlider::mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w)
+{
+    if (param == nullptr) return;
+    const int steps = param->getNumSteps();
+    const float stepN = steps > 1 && steps < 64 ? 1.0f / (float) (steps - 1) : 0.03f;
+    const float dir = w.deltaY > 0.0f ? 1.0f : (w.deltaY < 0.0f ? -1.0f : 0.0f);
+    const float norm = juce::jlimit (0.0f, 1.0f, param->getValue() + dir * stepN);
+    attachment->setValueAsCompleteGesture (param->convertFrom0to1 (norm));
+}
+
+void FxSlider::tick()
+{
+    if (param == nullptr) return;
+    bool changed = ui::approach (shown, param->getValue(), 0.35f);
+    changed |= ui::approach (glow, dragging || isMouseOver() ? 1.0f : 0.0f, 0.2f);
+    const auto t = param->getCurrentValueAsText();
+    if (t != shownText) { shownText = t; changed = true; }
+    if (changed) repaint();
+}
+
+void FxSlider::paint (juce::Graphics& g)
+{
+    if (param == nullptr) return;
+    const auto b = getLocalBounds().toFloat();
+    const float h = b.getHeight(), u = h / 56.0f;
+    // NOM  valeur
+    const auto f1 = ui::font (ui::Face::display, 13.0f * u, true, 0.12f), f2 = ui::font (ui::Face::display, 13.0f * u, false, 0.12f);
+    const juce::String v = shownText.toUpperCase();
+    const float w1 = ui::textWidth (f1, name) + 8.0f * u, w2 = ui::textWidth (f2, v) + 4.0f;
+    const float x0 = b.getCentreX() - (w1 + w2) * 0.5f;
+    g.setFont (f1);
+    g.setColour (ui::mist);
+    g.drawText (name, juce::Rectangle<float> (x0, b.getY(), w1, h * 0.42f), juce::Justification::centredLeft, false);
+    g.setFont (f2);
+    g.setColour (ui::haze);
+    g.drawText (v, juce::Rectangle<float> (x0 + w1, b.getY(), w2, h * 0.42f), juce::Justification::centredLeft, false);
+
+    // piste : fond sombre, remplissage braise jusqu'au bouton
+    const auto t = track();
+    const float th = 4.0f * u, x = t.getX() + juce::jlimit (0.0f, 1.0f, shown) * t.getWidth();
+    g.setColour (juce::Colours::black.withAlpha (0.45f));
+    g.fillRoundedRectangle (juce::Rectangle<float> (t.getX(), t.getY() - th * 0.5f, t.getWidth(), th), th * 0.5f);
+    juce::Path fill;
+    fill.addRoundedRectangle (juce::Rectangle<float> (t.getX(), t.getY() - th * 0.5f, std::max (th, x - t.getX()), th), th * 0.5f);
+    ui::strokeGlow (g, fill, ui::ember, 1.0f * u, 0.5f + 0.4f * glow);
+    g.setColour (ui::ember);
+    g.fillPath (fill);
+    // bouton : disque sombre, liseré clair
+    const float r = 10.0f * u;
+    const auto knob = juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre ({ x, t.getY() });
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.fillEllipse (knob.translated (0.0f, 2.0f * u).expanded (1.5f * u));
+    g.setGradientFill (juce::ColourGradient (ui::deep2.brighter (0.35f), knob.getX(), knob.getY(), ui::night, knob.getRight(), knob.getBottom(), false));
+    g.fillEllipse (knob);
+    g.setColour (ui::line.interpolatedWith (ui::bone, 0.25f + 0.35f * glow));
+    g.drawEllipse (knob.reduced (0.5f), std::max (1.0f, 1.2f * u));
+}
+
+//==============================================================================
+FxMenu::FxMenu (juce::AudioProcessorValueTreeState& s)
+{
+    const char* fxIds[10] { ids::phoneMix, ids::phoneDrive, ids::chorusMix, ids::chorusDepth, ids::tremoloMix, ids::tremoloRate,
+                            ids::sweepMix, ids::sweepStart, ids::wideMix, ids::wideWidth };
+    const char* names[10] { "MIX", "DRIVE", "MIX", "DEPTH", "MIX", "TIMING", "MIX", "START", "MIX", "WIDTH" };
+    for (int i = 0; i < 10; ++i)
+    {
+        sliders[(size_t) i] = std::make_unique<FxSlider> (s, fxIds[i], names[i]);
+        addChildComponent (*sliders[(size_t) i]);
+    }
+    setAlpha (0.0f);
+    setVisible (false);
+}
+
+void FxMenu::showFor (int e, juce::Rectangle<int> anchor)
+{
+    effect = e;
+    if (effect < 0) return;   // la fermeture se fait en fondu (tick)
+    for (int i = 0; i < 10; ++i) sliders[(size_t) i]->setVisible (i / 2 == effect);
+    auto* parent = getParentComponent();
+    const float u = ui::editorScale (*this);
+    const float w = 230.0f * u, h = 150.0f * u;
+    auto r = juce::Rectangle<float> (w, h).withCentre ({ (float) anchor.getCentreX(), (float) anchor.getY() - 8.0f * u - h * 0.5f });
+    if (parent != nullptr) r.setX (juce::jlimit (8.0f * u, (float) parent->getWidth() - w - 8.0f * u, r.getX()));
+    setBounds (r.toNearestInt());
+    setVisible (true);
+    toFront (false);
+    resized();
+}
+
+void FxMenu::resized()
+{
+    const float u = ui::editorScale (*this);
+    auto r = getLocalBounds().toFloat().reduced (16.0f * u, 12.0f * u);
+    const float sh = r.getHeight() * 0.5f;
+    for (int i = 0; i < 10; ++i)
+        sliders[(size_t) i]->setBounds (juce::Rectangle<float> (r.getX(), r.getY() + (float) (i % 2) * sh, r.getWidth(), sh).toNearestInt());
+}
+
+void FxMenu::tick()
+{
+    if (ui::approach (shown, effect >= 0 ? 1.0f : 0.0f, 0.25f))
+    {
+        setAlpha (shown);
+        if (shown <= 0.0f) setVisible (false);
+    }
+    if (! isVisible()) return;
+    for (auto& s : sliders) if (s->isVisible()) s->tick();
+}
+
+void FxMenu::paint (juce::Graphics& g)
+{
+    const float u = ui::editorScale (*this);
+    const auto b = getLocalBounds().toFloat().reduced (1.0f);
+    const float rad = 12.0f * u;
+    g.setColour (ui::night);   // carte opaque : rien ne transparaît dessous
+    g.fillRoundedRectangle (b, rad);
+    g.setGradientFill (juce::ColourGradient (ui::deep2, 0.0f, b.getY(), ui::night, 0.0f, b.getBottom(), false));
+    g.fillRoundedRectangle (b, rad);
+    g.setColour (ui::line.interpolatedWith (ui::ember, 0.3f));
+    g.drawRoundedRectangle (b.reduced (0.5f), rad, std::max (1.0f, u));
 }
 
 //==============================================================================
@@ -361,6 +569,18 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
     }
     for (auto* b : { &phone, &chorus, &tremolo, &sweep, &wide }) addAndMakeVisible (b);
 
+    // clic sur le nom d'un effet : son menu (MIX + un réglage)
+    {
+        FxToggle* fx[] { &phone, &chorus, &tremolo, &sweep, &wide };
+        for (int i = 0; i < 5; ++i)
+            fx[i]->onText = [this, i, fx]
+            {
+                const bool closing = fxMenu.current() == i;
+                fxMenu.showFor (closing ? -1 : i, fx[i]->getBounds());
+                for (int k = 0; k < 5; ++k) fx[k]->setMenuOpen (! closing && k == i);
+            };
+    }
+
     // EDIT : réglages secondaires, à la place du grand bouton
     addChildComponent (editPanel);
     editPanel.setInterceptsMouseClicks (false, true);
@@ -385,14 +605,19 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
         const auto t = juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_TEST", {});
         if (t.contains ("demo")) processor.loadTestTake();
         if (t.contains ("edit")) { display.setEditing (true); showEdit (true); }
+        if (t.contains ("fxmenu")) juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<OniriqueRiserAudioProcessorEditor> (this)] { if (sp != nullptr && sp->tremolo.onText) sp->tremolo.onText(); });
     }
    #endif
+    addChildComponent (fxMenu);   // au-dessus de tout
+    animated.push_back (&fxMenu);
+    addMouseListener (this, true);   // un clic ailleurs ferme le menu d'un effet
     startTimerHz (60);
 }
 
 OniriqueRiserAudioProcessorEditor::~OniriqueRiserAudioProcessorEditor()
 {
     stopTimer();
+    removeMouseListener (this);
     onirique::window::rememberOnThisComputer ("ONIRIQUE RISER", getWidth(), getHeight());
     tooltipWindow.setLookAndFeel (nullptr);
     setLookAndFeel (nullptr);
@@ -533,4 +758,14 @@ void OniriqueRiserAudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour (ui::haze.withMultipliedAlpha (1.0f - editAmt));
         g.drawText (shownLength, juce::Rectangle<float> (x0 + w1, knobLabel.getY(), w2, knobLabel.getHeight()), juce::Justification::centredLeft, false);
     }
+}
+
+// un clic hors du menu d'un effet (et hors des noms d'effets, qui le gèrent eux-mêmes) le ferme
+void OniriqueRiserAudioProcessorEditor::mouseDown (const juce::MouseEvent& e)
+{
+    if (fxMenu.current() < 0) return;
+    for (auto* c = e.eventComponent; c != nullptr; c = c->getParentComponent())
+        if (c == &fxMenu || dynamic_cast<FxToggle*> (c) != nullptr) return;
+    fxMenu.showFor (-1, {});
+    for (auto* b : { &phone, &chorus, &tremolo, &sweep, &wide }) b->setMenuOpen (false);
 }

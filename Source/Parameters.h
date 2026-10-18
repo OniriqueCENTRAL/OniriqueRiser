@@ -21,6 +21,13 @@ namespace ids
     inline constexpr const char* inSync  = "inSync";     // la montée joue d'elle-même pendant la lecture du DAW
     inline constexpr const char* phrase  = "phrase";     // phrase de la prise (session : ni presets, ni automation)
     inline constexpr const char* bypass  = "bypass";
+    // réglages des effets (menu au clic sur leur nom)
+    inline constexpr const char* phoneMix = "phoneMix", *phoneDrive = "phoneDrive";
+    inline constexpr const char* chorusMix = "chorusMix", *chorusDepth = "chorusDepth";
+    inline constexpr const char* tremoloMix = "tremoloMix", *tremoloRate = "tremoloRate";
+    inline constexpr const char* sweepMix = "sweepMix", *sweepStart = "sweepStart";
+    inline constexpr const char* wideMix = "wideMix", *wideWidth = "wideWidth";
+    inline constexpr const char* raw = "raw";            // RAW : la reverse reverb seule, sans effets (session)
 }
 
 inline const juce::StringArray& spaceNames()
@@ -60,6 +67,26 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     p.push_back (std::make_unique<AudioParameterInt> (ParameterID { ids::phrase, 1 }, "Phrase", 0, 63, 0,
                                                       AudioParameterIntAttributes().withAutomatable (false)));
     p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ids::bypass, 1 }, "Bypass", false));
+
+    auto pctP = [&] (const char* id, const char* name, float def)
+    {
+        p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { id, 1 }, name, NormalisableRange<float> (0.0f, 100.0f, 1.0f), def,
+                                                            Attr().withLabel ("%").withStringFromValueFunction (pct)));
+    };
+    pctP (ids::phoneMix, "Phone Mix", 100.0f);     pctP (ids::phoneDrive, "Phone Drive", 50.0f);
+    pctP (ids::chorusMix, "Chorus Mix", 100.0f);   pctP (ids::chorusDepth, "Chorus Depth", 65.0f);
+    pctP (ids::tremoloMix, "Tremolo Mix", 75.0f);
+    p.push_back (std::make_unique<AudioParameterChoice> (ParameterID { ids::tremoloRate, 1 }, "Tremolo Timing",
+                                                         StringArray { "1/4", "1/8", "1/16", "1/32" }, 2));
+    pctP (ids::sweepMix, "Sweep Mix", 100.0f);
+    {
+        NormalisableRange<float> r (80.0f, 2000.0f, 1.0f);
+        r.setSkewForCentre (400.0f);
+        p.push_back (std::make_unique<AudioParameterFloat> (ParameterID { ids::sweepStart, 1 }, "Sweep Start", r, 300.0f,
+            Attr().withLabel ("Hz").withStringFromValueFunction ([] (float v, int) { return v >= 1000.0f ? String (v / 1000.0f, 1) + " kHz" : String (roundToInt (v)) + " Hz"; })));
+    }
+    pctP (ids::wideMix, "Wide Mix", 100.0f);        pctP (ids::wideWidth, "Wide Width", 90.0f);
+    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ids::raw, 1 }, "Raw", false, AudioParameterBoolAttributes().withAutomatable (false)));
     return { p.begin(), p.end() };
 }
 } // namespace onirique

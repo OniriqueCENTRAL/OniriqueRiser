@@ -231,7 +231,7 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     }
     else if (usable && ! playing && listenOn.load())
     {
-        const int a = res->riser.getNumSamples() - res->padSamples, b = res->voiceAfter.getNumSamples(), total = a + b;
+        const int total = res->riser.getNumSamples() - res->padSamples;   // la montée seule (sans la voix qui suit)
         for (int i = 0; i < n; ++i)
         {
             if (listenIdx >= total)
@@ -240,8 +240,7 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
                 listenIdx = 0;
             }
             for (int c = 0; c < numCh; ++c)
-                buffer.addSample (c, i, listenIdx < a ? res->riser.getSample (c, res->padSamples + listenIdx)
-                                                      : res->voiceAfter.getSample (c, listenIdx - a));
+                buffer.addSample (c, i, res->riser.getSample (c, res->padSamples + listenIdx));
             ++listenIdx;
         }
         listenPos = total > 0 ? (double) listenIdx / total : 0.0;
@@ -272,6 +271,12 @@ RiserSettings OniriqueRiserAudioProcessor::readSettings() const
     s.sweep = v (ids::sweep) > 0.5f;
     s.wide = v (ids::wide) > 0.5f;
     s.phrase = juce::roundToInt (v (ids::phrase));
+    s.phoneMix = v (ids::phoneMix) * 0.01f;   s.phoneDrive = v (ids::phoneDrive) * 0.01f;
+    s.chorusMix = v (ids::chorusMix) * 0.01f; s.chorusDepth = v (ids::chorusDepth) * 0.01f;
+    s.tremoloMix = v (ids::tremoloMix) * 0.01f; s.tremoloRate = juce::roundToInt (v (ids::tremoloRate));
+    s.sweepMix = v (ids::sweepMix) * 0.01f;   s.sweepStart = v (ids::sweepStart);
+    s.wideMix = v (ids::wideMix) * 0.01f;     s.wideWidth = v (ids::wideWidth) * 0.01f;
+    s.raw = v (ids::raw) > 0.5f;
     return s;
 }
 
@@ -279,7 +284,10 @@ static bool sameSettings (const RiserSettings& a, const RiserSettings& b)
 {
     return a.lengthIdx == b.lengthIdx && a.space == b.space && a.sourceBeats == b.sourceBeats && a.size == b.size && a.curve == b.curve
         && a.gainDb == b.gainDb && a.sClean == b.sClean && a.phone == b.phone && a.chorus == b.chorus && a.tremolo == b.tremolo
-        && a.sweep == b.sweep && a.wide == b.wide && a.phrase == b.phrase;
+        && a.sweep == b.sweep && a.wide == b.wide && a.phrase == b.phrase
+        && a.phoneMix == b.phoneMix && a.phoneDrive == b.phoneDrive && a.chorusMix == b.chorusMix && a.chorusDepth == b.chorusDepth
+        && a.tremoloMix == b.tremoloMix && a.tremoloRate == b.tremoloRate && a.sweepMix == b.sweepMix && a.sweepStart == b.sweepStart
+        && a.wideMix == b.wideMix && a.wideWidth == b.wideWidth && a.raw == b.raw;
 }
 
 // thread de l'interface : reprend une prise terminée, relance le calcul quand un réglage change
