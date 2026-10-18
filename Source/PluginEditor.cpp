@@ -139,10 +139,11 @@ void RiserDisplay::tick()
     bool changed = r != shown || st != shownState || rend != rendering || std::abs (lp - listen) > 1.0e-4 || std::abs (rs - recSec) > 0.05;
     if (r != shown) appear = 0.0f;
     shown = r; shownState = st; rendering = rend; listen = lp; recSec = rs;
-    changed |= ui::approach (appear, 1.0f, 0.10f);
+    changed |= ui::approach (appear, 1.0f, frozen ? 1.0f : 0.10f);
     changed |= ui::approach (grab, hover == zWave || dragging ? 1.0f : 0.0f, 0.2f);
     if (noteFrames > 0 && --noteFrames == 0) { note.clear(); changed = true; }
-    if (st != 0 || rend || shown == nullptr || shown->riserSamples == 0) { pulse += 1.0f / 60.0f; changed = true; }
+    if (frozen) {}   // capture de la démo : image figée, identique d'une prise à l'autre
+    else     if (st != 0 || rend || shown == nullptr || shown->riserSamples == 0) { pulse += 1.0f / 60.0f; changed = true; }
     else if ((++frames & 1) == 0) { pulse += 1.0f / 30.0f; changed = true; }   // lueur animée de la montée : 30 i/s
     if (changed) repaint();
 }
@@ -604,6 +605,7 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
     {
         const auto t = juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_TEST", {});
         if (t.contains ("demo")) processor.loadTestTake();
+        if (t.contains ("static")) display.frozen = true;
         if (t.contains ("edit")) { display.setEditing (true); showEdit (true); }
         if (t.contains ("fxmenu")) juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<OniriqueRiserAudioProcessorEditor> (this)] { if (sp != nullptr && sp->tremolo.onText) sp->tremolo.onText(); });
     }

@@ -36,6 +36,9 @@ private:
     juce::String note;   // message bref (rien à glisser...)
     int noteFrames = 0;
     int frames = 0;
+public:
+    bool frozen = false;   // essais locaux (visuel de démo) : aucune animation, chaque image est exacte
+private:
 };
 
 // Effet en un clic (PHONE, CHORUS...) : le pictogramme marche / arrêt allume ou coupe l'effet ; un clic sur le NOM ouvre
