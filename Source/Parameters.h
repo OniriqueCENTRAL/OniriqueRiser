@@ -27,7 +27,8 @@ namespace ids
     inline constexpr const char* tremoloMix = "tremoloMix", *tremoloRate = "tremoloRate";
     inline constexpr const char* sweepMix = "sweepMix", *sweepStart = "sweepStart";
     inline constexpr const char* wideMix = "wideMix", *wideWidth = "wideWidth";
-    inline constexpr const char* raw = "raw";            // RAW : la reverse reverb seule, sans effets (session)
+    inline constexpr const char* raw = "raw";            // vue RAW : la prise et les poignées de la source (session)
+    inline constexpr const char* inputOpen = "inputOpen"; // INPUT OPEN : la prochaine lecture est capturée ; CLOSED : la prise est gardée (session)
 }
 
 inline const juce::StringArray& spaceNames()
@@ -94,7 +95,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
             Attr().withLabel ("Hz").withStringFromValueFunction ([] (float v, int) { return v >= 1000.0f ? String (v / 1000.0f, 1) + " kHz" : String (roundToInt (v)) + " Hz"; }).withAutomatable (aut)));
     }
     pctP (ids::wideMix, "Wide Mix", 100.0f);        pctP (ids::wideWidth, "Wide Width", 90.0f);
-    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ids::raw, 1 }, "Raw", false, AudioParameterBoolAttributes().withAutomatable (false)));
+    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ids::raw, 1 }, "Raw View", false, AudioParameterBoolAttributes().withAutomatable (false)));
+    p.push_back (std::make_unique<AudioParameterBool> (ParameterID { ids::inputOpen, 1 }, "Input Open", true, AudioParameterBoolAttributes().withAutomatable (false)));
     return { p.begin(), p.end() };
 }
 } // namespace onirique

@@ -153,10 +153,16 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
         }
     bpmNow.store (bpm, std::memory_order_relaxed);
 
-    // ---- capture automatique
+    // ---- capture automatique (INPUT OPEN seulement ; à la fermeture, une capture en cours se termine, l'attente s'arrête)
+    const bool inputOpen = apvts.getRawParameterValue (ids::inputOpen)->load() > 0.5f;
+    if (! inputOpen)
+    {
+        if (capPhase.load() == 2) finishCapture();
+        else if (capPhase.load() == 1) capPhase = 0;
+    }
     const int phase = capPhase.load();
-    if (playing && ! wasPlaying && phase != 3) { capPhase = 1; preWrite = preFill = 0; recLen = 0; }
-    if (playing && capPhase.load() == 1)
+    if (inputOpen && playing && ! wasPlaying && phase != 3) { capPhase = 1; preWrite = preFill = 0; recLen = 0; }
+    if (inputOpen && playing && capPhase.load() == 1)
     {
         // pré-écoute : les 2 dernières secondes, pour garder l'attaque quand la voix arrive
         float pk = 0.0f;
@@ -231,16 +237,20 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     }
     else if (usable && ! playing && listenOn.load())
     {
-        const int total = res->riser.getNumSamples() - res->padSamples;   // la montée seule (sans la voix qui suit)
+        // vue FX : la montée seule (sans la voix qui suit) ; vue RAW : la partie de la prise choisie entre les poignées
+        const bool rawView = apvts.getRawParameterValue (ids::raw)->load() > 0.5f;
+        const auto& src = rawView ? res->sourceAudio : res->riser;
+        const int from = rawView ? 0 : res->padSamples;
+        const int total = juce::jmax (0, src.getNumSamples() - from);
         for (int i = 0; i < n; ++i)
         {
             if (listenIdx >= total)
             {
-                if (! loop.load()) { listenOn = false; break; }
+                if (! loop.load() || total == 0) { listenOn = false; break; }
                 listenIdx = 0;
             }
             for (int c = 0; c < numCh; ++c)
-                buffer.addSample (c, i, res->riser.getSample (c, res->padSamples + listenIdx));
+                buffer.addSample (c, i, src.getSample (juce::jmin (c, src.getNumChannels() - 1), from + listenIdx));
             ++listenIdx;
         }
         listenPos = total > 0 ? (double) listenIdx / total : 0.0;
@@ -276,7 +286,8 @@ RiserSettings OniriqueRiserAudioProcessor::readSettings() const
     s.tremoloMix = v (ids::tremoloMix) * 0.01f; s.tremoloRate = juce::roundToInt (v (ids::tremoloRate));
     s.sweepMix = v (ids::sweepMix) * 0.01f;   s.sweepStart = v (ids::sweepStart);
     s.wideMix = v (ids::wideMix) * 0.01f;     s.wideWidth = v (ids::wideWidth) * 0.01f;
-    s.raw = v (ids::raw) > 0.5f;
+    s.trimStart = trimA.load();
+    s.trimEnd = trimB.load();
     return s;
 }
 
@@ -287,7 +298,7 @@ static bool sameSettings (const RiserSettings& a, const RiserSettings& b)
         && a.sweep == b.sweep && a.wide == b.wide && a.phrase == b.phrase
         && a.phoneMix == b.phoneMix && a.phoneDrive == b.phoneDrive && a.chorusMix == b.chorusMix && a.chorusDepth == b.chorusDepth
         && a.tremoloMix == b.tremoloMix && a.tremoloRate == b.tremoloRate && a.sweepMix == b.sweepMix && a.sweepStart == b.sweepStart
-        && a.wideMix == b.wideMix && a.wideWidth == b.wideWidth && a.raw == b.raw;
+        && a.wideMix == b.wideMix && a.wideWidth == b.wideWidth && a.trimStart == b.trimStart && a.trimEnd == b.trimEnd;
 }
 
 // thread de l'interface : reprend une prise terminée, relance le calcul quand un réglage change
@@ -309,12 +320,19 @@ void OniriqueRiserAudioProcessor::timerCallback()
                 const juce::SpinLock::ScopedLockType sl (lock);
                 take = c;
             }
-            // nouvelle prise : première phrase
+            // nouvelle prise : première phrase, source automatique
             if (auto* p = apvts.getParameter (ids::phrase)) p->setValueNotifyingHost (p->convertTo0to1 (0.0f));
+            resetTrim();
             newTake = true;
         }
     }
 
+    // une autre phrase ou un autre SOURCE : la source redevient automatique (début de la phrase)
+    if (haveSettings)
+    {
+        const auto now = readSettings();
+        if (now.phrase != lastSettings.phrase || now.sourceBeats != lastSettings.sourceBeats) resetTrim();
+    }
     const auto s = readSettings();
     if (newTake || ! haveSettings || ! sameSettings (s, lastSettings))
     {
@@ -408,6 +426,7 @@ void OniriqueRiserAudioProcessor::loadTestTake()
         const juce::SpinLock::ScopedLockType sl (lock);
         take = c;
     }
+    resetTrim();
     haveSettings = false;   // relance le calcul au prochain tour du minuteur
 }
 #endif

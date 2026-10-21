@@ -17,7 +17,8 @@ namespace onirique
 
     1. Les phrases : enveloppe RMS (10 ms) ; une phrase commence là où le son revient après au moins 250 ms de silence
        (seuil : 35 dB sous le plus fort passage de la prise, jamais sous -50 dBFS).
-    2. La SOURCE : le début de la phrase choisie (SOURCE temps), adouci à la fin. Avec S-CLEAN, ses S sont retirés deux
+    2. La SOURCE : le début de la phrase choisie (SOURCE temps), ou la partie de la prise choisie à la main entre les
+       deux poignées de la vue RAW (la montée finit alors là où elle commence), adoucie à la fin. Avec S-CLEAN, ses S sont retirés deux
        fois : le de-esser de la VOCALBOX à fond, puis, dans l'envoi vers la reverb seulement, un détecteur de sifflantes
        (part de l'énergie au-dessus de 5 kHz) qui fait plonger l'envoi jusqu'à -24 dB sur chaque S : aucune sifflante
        ne ressort à l'envers dans la montée.
@@ -25,7 +26,8 @@ namespace onirique
        DARK PLATE, HALL, SHIMMER) réglée pour durer au moins la montée, puis le retour est retourné à nouveau :
        y(t) = somme de h(tau) x(t + tau), la reverb "avant" la voix. On garde la partie qui précède le premier mot.
     4. Couleur : SWEEP (filtre qui s'ouvre en montant), PHONE, CHORUS, TREMOLO (doubles-croches au tempo), WIDE ;
-       forme (CURVE), fondu d'entrée, normalisation à -1 dBFS puis GAIN.
+       pré-fondu (CURVE, le point de la courbe : gain t^(3 CURVE), de plat à très creusé), fondu d'entrée,
+       normalisation à -1 dBFS puis GAIN.
     5. Le fichier commence sur un temps de la grille du DAW (silence ajouté devant) : on le pose sur ce temps, la montée
        finit exactement sur la voix.
 */
@@ -46,15 +48,17 @@ struct RiserSettings
     int space = 1;                    // ROOM, PLATE, DARK PLATE, HALL, SHIMMER
     float sourceBeats = 1.0f;         // durée du début de phrase envoyée dans la reverb
     float size = 0.6f;                // 0..1 : longueur de la queue par rapport à la montée
-    float curve = 0.0f;               // 0..1 : la montée se creuse (arrive plus tard, plus fort)
+    float curve = 0.0f;               // 0..1 : pré-fondu de la montée, gain t^(3 curve) : 0 aucun, 1/3 droit, 1 très creusé
     float gainDb = 0.0f;
     bool sClean = true, phone = false, chorus = false, tremolo = false, sweep = false, wide = false;
     // réglages des effets (0..1, sauf la cadence du trémolo : 0 1/4, 1 1/8, 2 1/16, 3 1/32 ; le départ du SWEEP en Hz)
     float phoneMix = 1.0f, phoneDrive = 0.5f, chorusMix = 1.0f, chorusDepth = 0.65f, tremoloMix = 1.0f, sweepMix = 1.0f, sweepStart = 300.0f,
           wideMix = 1.0f, wideWidth = 0.9f;
     int tremoloRate = 2;
-    bool raw = false;   // RAW : la reverse reverb seule (ni effets, ni CURVE)
     int phrase = 0;
+    // la SOURCE choisie à la main dans la vue RAW (secondes depuis le début de la prise) ; < 0 : automatique (début de
+    // la phrase choisie, durée SOURCE)
+    double trimStart = -1.0, trimEnd = -1.0;
 };
 
 struct RiserResult
@@ -73,6 +77,11 @@ struct RiserResult
     std::vector<float> riserEnv;      // affichage : crête par tranche
     std::vector<float> voiceEnv;      // affichage : la voix juste après (même durée que la montée)
     juce::AudioBuffer<float> voiceAfter;   // écoute : la voix qui suit la montée (2 s)
+    // vue RAW : toute la prise, et la partie qui crée la montée
+    std::vector<float> takeEnv;       // crête par tranche, toute la prise
+    double takeSec = 0.0, srcStartSec = 0.0, srcEndSec = 0.0;   // secondes depuis le début de la prise
+    bool manualSource = false;
+    juce::AudioBuffer<float> sourceAudio;   // écoute en RAW : la partie choisie, à l'endroit
 };
 
 class RiserEngine
@@ -155,7 +164,7 @@ public:
         res.phraseCount = (int) phrases.size();
         if (phrases.empty() || n < 16) return res;
         res.phrase = juce::jlimit (0, res.phraseCount - 1, st.phrase);
-        const int onset = phrases[(size_t) res.phrase];
+        int onset = phrases[(size_t) res.phrase];
 
         const double bpm = juce::jlimit (20.0, 400.0, cap.bpm);
         const double beatSec = 60.0 / bpm;
@@ -164,12 +173,29 @@ public:
         const int R = juce::jmax (16, (int) std::lround (beats * beatSec * fs));
         res.riserSamples = R;
 
-        // ---- 2. la source : le début de la phrase (5 ms avant l'attaque), fondu de sortie
-        const int pre = (int) (0.005 * fs);
-        const int s0 = juce::jmax (0, onset - pre);
-        const int S = juce::jlimit ((int) (0.12 * fs), juce::jmax ((int) (0.12 * fs), n - s0),
-                                    (int) std::lround (juce::jlimit (0.1, 4.0, (double) st.sourceBeats * beatSec) * fs));
+        // ---- 2. la source : le début de la phrase (5 ms avant l'attaque, durée SOURCE), ou la partie choisie à la main
+        //       dans la vue RAW ; la montée finit là où la source commence. Fondu de sortie.
+        const bool manual = st.trimStart >= 0.0 && st.trimEnd > st.trimStart && n > (int) (0.05 * fs);
+        int s0 = 0, S = 0;
+        if (manual)
+        {
+            s0 = juce::jlimit (0, n - (int) (0.02 * fs), (int) std::lround (st.trimStart * fs));
+            const int e = juce::jlimit (s0 + (int) (0.02 * fs), n, (int) std::lround (st.trimEnd * fs));
+            S = e - s0;
+            onset = s0;
+        }
+        else
+        {
+            const int pre = (int) (0.005 * fs);
+            s0 = juce::jmax (0, onset - pre);
+            S = juce::jlimit ((int) (0.12 * fs), juce::jmax ((int) (0.12 * fs), n - s0),
+                              (int) std::lround (juce::jlimit (0.1, 4.0, (double) st.sourceBeats * beatSec) * fs));
+        }
         const int Sa = juce::jmin (S, n - s0);
+        res.manualSource = manual;
+        res.takeSec = n / fs;
+        res.srcStartSec = s0 / fs;
+        res.srcEndSec = (s0 + Sa) / fs;
         juce::AudioBuffer<float> src (2, S);
         src.clear();
         for (int c = 0; c < 2; ++c)
@@ -180,6 +206,7 @@ public:
                 for (int i = 0; i < fo; ++i)
                     src.setSample (c, Sa - fo + i, src.getSample (c, Sa - fo + i) * 0.5f * (1.0f + std::cos (juce::MathConstants<float>::pi * (float) i / (float) fo)));
         }
+        res.sourceAudio.makeCopyOf (src);   // écoute en RAW : la partie choisie, telle qu'elle part dans la reverb
 
         juce::AudioBuffer<float> send (src);
         if (st.sClean) cleanSibilance (src, send, fs, S);
@@ -224,9 +251,8 @@ public:
                 riser.setSample (c, i, m >= 0 ? wet.getSample (c, L - 1 - m) : 0.0f);
             }
 
-        // ---- 4. couleur et forme (RAW : la reverse reverb telle quelle)
-        if (! st.raw) colour (riser, fs, beatSec, st);
-        else colourRaw (riser, fs);
+        // ---- 4. couleur et forme (pré-fondu : CURVE)
+        colour (riser, fs, beatSec, st);
 
         float pk = 0.0f;
         for (int c = 0; c < 2; ++c) pk = std::max (pk, riser.getMagnitude (c, 0, R));
@@ -266,6 +292,7 @@ public:
         const int va = juce::jmin ((int) (2.0 * fs), n - onset);
         res.voiceAfter.setSize (2, va);
         for (int c = 0; c < 2; ++c) res.voiceAfter.copyFrom (c, 0, cap.audio, juce::jmin (c, cap.audio.getNumChannels() - 1), onset, va);
+        res.takeEnv = envelope (cap.audio, 0, n, 600);
         return res;
     }
 
@@ -402,12 +429,9 @@ private:
                 }
             });
 
-        // forme : CURVE creuse le début ; fondu d'entrée de 30 ms (rien ne claque au début du fichier)
+        // forme : pré-fondu CURVE (le point de la courbe, vue FX) ; fondu d'entrée de 30 ms (rien ne claque au début du fichier)
         shape (r, fs, 1.0f + 3.0f * juce::jlimit (0.0f, 1.0f, st.curve));
     }
-
-    // RAW : la reverse reverb seule, avec seulement le fondu d'entrée
-    static void colourRaw (juce::AudioBuffer<float>& r, double fs) { shape (r, fs, 1.0f); }
 
     static void shape (juce::AudioBuffer<float>& r, double fs, float p)
     {

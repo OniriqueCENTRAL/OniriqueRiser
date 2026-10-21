@@ -14,8 +14,12 @@
     mesure). À l'arrêt de la lecture (ou à un saut de lecture, une boucle), la prise est prête et la montée calculée
     sur un thread à part. Une lecture sans voix ne remplace pas la prise d'avant.
 
-    Ensuite : glisser le fichier dans le DAW (exportRiser), l'écouter dans le plugin DAW à l'arrêt (LISTEN / LOOP), ou
-    IN SYNC : la montée est jouée par le plugin lui-même, au bon moment, pendant la lecture.
+    Ensuite : glisser le fichier dans le DAW (exportRiser), l'écouter dans le plugin DAW à l'arrêt (LISTEN / LOOP ; dans
+    la vue RAW, LISTEN joue la partie de la prise choisie entre les poignées), ou IN SYNC : la montée est jouée par le
+    plugin lui-même, au bon moment, pendant la lecture.
+
+    INPUT CLOSED : plus rien n'est capturé, la prise reste telle quelle (une relecture ne remplace pas la lead, et la
+    montée posée sur la même piste ne se capture pas elle-même). Une capture en cours se termine à la fermeture.
 */
 class OniriqueRiserAudioProcessor : public juce::AudioProcessor,
                                     private juce::Timer
@@ -64,6 +68,11 @@ public:
     bool isListening() const noexcept { return listenOn.load(); }
     double listenPosition() const noexcept { return listenPos.load(); }   // 0..1 : position dans la montée
     std::atomic<bool> loop { false };
+    // la source choisie à la main dans la vue RAW (secondes depuis le début de la prise) ; resetTrim : automatique
+    // (début de la phrase, durée SOURCE). Une nouvelle prise, une autre phrase ou un autre SOURCE reviennent à l'automatique.
+    void setTrim (double startSec, double endSec) { trimA = startSec; trimB = endSec; }
+    void resetTrim() { trimA = -1.0; trimB = -1.0; }
+    bool isInputOpen() const { return apvts.getRawParameterValue (onirique::ids::inputOpen)->load() > 0.5f; }
     float consumeLevel() noexcept { return level.exchange (0.0f); }
     double hostBpm() const noexcept { return bpmNow.load(); }
    #if ONIRIQUE_UI_TEST
@@ -102,6 +111,7 @@ private:
     onirique::RiserSettings lastSettings;
     bool haveSettings = false;
     std::atomic<bool> renderPending { false }, renderBusy { false };
+    std::atomic<double> trimA { -1.0 }, trimB { -1.0 };
 
     // écoute dans le plugin
     std::atomic<bool> listenOn { false };

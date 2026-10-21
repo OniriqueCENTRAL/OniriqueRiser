@@ -8,7 +8,7 @@ namespace onirique
 /*  Presets : usine (définis ici) + utilisateur (fichiers .orsrpreset dans
     %APPDATA%/Onirique/Riser/Presets). Thread de l'interface uniquement.
 
-    - Un preset contient tous les réglages SAUF Bypass, la phrase choisie et IN SYNC (réglages de session).
+    - Un preset contient tous les réglages SAUF Bypass, la phrase choisie, IN SYNC, la vue RAW et INPUT (réglages de session).
     - Un paramètre absent d'un fichier reprend sa valeur par défaut.
     - Le nom du preset courant est rangé dans l'état du plugin : il revient avec le projet.
     - "Modifié" : comparaison des valeurs actuelles avec celles du chargement.
@@ -131,8 +131,9 @@ private:
         std::vector<juce::RangedAudioParameter*> v;
         for (auto* p : apvts.processor.getParameters())
             if (auto* r = dynamic_cast<juce::RangedAudioParameter*> (p))
-                if (const auto id = r->getParameterID(); id != ids::bypass && id != ids::phrase && id != ids::inSync && id != ids::raw)
-                    v.push_back (r);   // réglages de session exclus : bypass, phrase choisie, IN SYNC, RAW
+                if (const auto id = r->getParameterID(); id != ids::bypass && id != ids::phrase && id != ids::inSync && id != ids::raw
+                    && id != ids::inputOpen)
+                    v.push_back (r);   // réglages de session exclus : bypass, phrase choisie, IN SYNC, vue RAW, INPUT
         return v;
     }
 

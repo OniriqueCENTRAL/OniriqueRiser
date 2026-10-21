@@ -4,7 +4,10 @@
 #include "PluginProcessor.h"
 
 // Le panneau de la montée : titre, la montée (braise) qui monte jusqu'à la voix, l'état de la capture, où poser le
-// fichier. On attrape la forme d'onde à la souris et on la glisse dans le DAW. En bas : LISTEN, LOOP, EDIT.
+// fichier. En bas : LISTEN, LOOP, la vue FX / RAW, INPUT OPEN / CLOSED, EDIT.
+//   FX : la montée finie ; on l'attrape et on la glisse dans le DAW. La courbe de pré-fondu passe dessus : on tire son
+//        point pour façonner la montée (plus bas : elle part plus discrète et arrive plus tard ; c'est le réglage CURVE).
+//   RAW : toute la prise ; deux poignées choisissent la partie (la syllabe) qui crée la reverse reverb.
 class RiserDisplay : public juce::Component, public juce::SettableTooltipClient, public Animated
 {
 public:
@@ -22,17 +25,27 @@ public:
     void setEditing (bool e) { editing = e; repaint(); }
 
 private:
-    enum Zone { none = -1, zListen, zLoop, zEdit, zRaw, zPrev, zNext, zWave };
+    enum Zone { none = -1, zListen, zLoop, zEdit, zFx, zRaw, zInput, zPrev, zNext, zDot, zHandleA, zHandleB, zWave };
     Zone zoneAt (juce::Point<float>) const;
-    juce::Rectangle<float> waveArea() const, listenZone() const, loopZone() const, editZone() const, rawZone() const, prevZone() const, nextZone() const;
+    juce::Rectangle<float> waveArea() const, listenZone() const, loopZone() const, editZone() const, fxZone() const, rawZone() const,
+                           inputZone() const, prevZone() const, nextZone() const;
+    bool rawView() const;
+    float curveExponent() const;                 // pré-fondu : gain t^k, k = 3 CURVE
+    juce::Point<float> dotPos() const;           // le point de la courbe (vue FX)
+    float handleX (int which) const;             // poignées de la source (vue RAW)
+    void setParam (const char* id, float value);
+    void updateTooltip();
 
     OniriqueRiserAudioProcessor& processor;
     std::shared_ptr<const onirique::RiserResult> shown;
     int shownState = -1;
     Zone hover = none;
-    float pulse = 0.0f, appear = 0.0f, grab = 0.0f;
+    float pulse = 0.0f, appear = 0.0f, grab = 0.0f, view = 0.0f, inputLit = 1.0f;
     double listen = -1.0, recSec = 0.0;
     bool rendering = false, dragging = false, editing = false, looping = false;
+    // gestes : point de la courbe, poignées de la source
+    Zone dragZone = none;
+    double selA = -1.0, selB = -1.0;   // sélection en cours de glissement (secondes depuis le début de la prise)
     juce::String note;   // message bref (rien à glisser...)
     int noteFrames = 0;
     int frames = 0;

@@ -9,6 +9,8 @@ namespace
 constexpr float kBaseW = ui::kEditorBaseW, kBaseH = ui::kEditorBaseH;   // carré
 constexpr int kMinW = 440, kMaxW = 1100;
 constexpr float kPi = juce::MathConstants<float>::pi;
+// rose pâle : la courbe de pré-fondu et ses repères (braise mêlée d'os)
+const juce::Colour kRose = ui::ember.interpolatedWith (ui::bone, 0.55f);
 
 void iconPower (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c, float w)
 {
@@ -26,8 +28,7 @@ void iconPower (juce::Graphics& g, juce::Rectangle<float> r, juce::Colour c, flo
 //==============================================================================
 RiserDisplay::RiserDisplay (OniriqueRiserAudioProcessor& p) : processor (p)
 {
-    setTooltip ("Play your DAW over the vocal: it is captured automatically, the riser is ready when you stop. "
-                "Then grab the waveform and drop it in your DAW, at the bar shown.");
+    updateTooltip();
 }
 
 juce::Rectangle<float> RiserDisplay::waveArea() const
@@ -47,11 +48,18 @@ juce::Rectangle<float> RiserDisplay::editZone() const
     const float u = ui::editorScale (*this);
     return { (float) getWidth() - 16.0f * u - 54.0f * u, (float) getHeight() - 34.0f * u, 54.0f * u, 24.0f * u };
 }
-// RAW : juste à gauche d'EDIT
-juce::Rectangle<float> RiserDisplay::rawZone() const
+// FX | RAW : la vue, juste après LOOP
+juce::Rectangle<float> RiserDisplay::fxZone() const
 {
     const float u = ui::editorScale (*this);
-    return editZone().translated (-50.0f * u, 0.0f).withWidth (42.0f * u);
+    return { loopZone().getRight() + 14.0f * u, (float) getHeight() - 34.0f * u, 46.0f * u, 24.0f * u };
+}
+juce::Rectangle<float> RiserDisplay::rawZone() const { return fxZone().translated (fxZone().getWidth(), 0.0f); }
+// INPUT OPEN / CLOSED : à gauche d'EDIT
+juce::Rectangle<float> RiserDisplay::inputZone() const
+{
+    const float u = ui::editorScale (*this);
+    return editZone().translated (-126.0f * u, 0.0f).withWidth (116.0f * u);
 }
 juce::Rectangle<float> RiserDisplay::prevZone() const
 {
@@ -64,31 +72,99 @@ juce::Rectangle<float> RiserDisplay::nextZone() const
     return { (float) getWidth() - 40.0f * u, 10.0f * u, 24.0f * u, 24.0f * u };
 }
 
+bool RiserDisplay::rawView() const { return processor.apvts.getRawParameterValue (ids::raw)->load() > 0.5f; }
+
+float RiserDisplay::curveExponent() const { return 3.0f * juce::jlimit (0.0f, 1.0f, processor.apvts.getRawParameterValue (ids::curve)->load() * 0.01f); }
+
+// le point de la courbe de pré-fondu : sur la courbe y = x^k, à la place où on l'a lâché
+juce::Point<float> RiserDisplay::dotPos() const
+{
+    const auto wa = waveArea();
+    const float x = juce::jlimit (0.06f, 0.94f, (float) (double) processor.apvts.state.getProperty ("curveDotX", 0.5));
+    const float k = curveExponent();
+    const float y = k <= 0.0f ? 1.0f : std::pow (x, k);
+    return { wa.getX() + x * wa.getWidth(), wa.getBottom() - y * wa.getHeight() * 0.9f };
+}
+
+// poignées de la source : pendant le geste, la sélection en cours ; sinon celle du dernier calcul
+float RiserDisplay::handleX (int which) const
+{
+    const auto wa = waveArea();
+    if (shown == nullptr || shown->takeSec <= 0.0) return wa.getX();
+    const double s = selA >= 0.0 ? (which == 0 ? selA : selB) : (which == 0 ? shown->srcStartSec : shown->srcEndSec);
+    return wa.getX() + (float) (juce::jlimit (0.0, 1.0, s / shown->takeSec)) * wa.getWidth();
+}
+
+void RiserDisplay::setParam (const char* id, float value)
+{
+    if (auto* p = processor.apvts.getParameter (id))
+    { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 (value)); p->endChangeGesture(); }
+}
+
 RiserDisplay::Zone RiserDisplay::zoneAt (juce::Point<float> p) const
 {
-    const bool many = shown != nullptr && shown->phraseCount > 1;
+    const float u = ui::editorScale (*this);
+    const bool has = shown != nullptr && shown->riserSamples > 0;
+    const bool many = has && shown->phraseCount > 1;
     if (listenZone().contains (p)) return zListen;
     if (loopZone().contains (p)) return zLoop;
     if (editZone().contains (p)) return zEdit;
+    if (inputZone().contains (p)) return zInput;
+    if (fxZone().contains (p)) return zFx;
     if (rawZone().contains (p)) return zRaw;
     if (many && prevZone().contains (p)) return zPrev;
     if (many && nextZone().contains (p)) return zNext;
-    if (waveArea().expanded (8.0f).contains (p)) return zWave;
+    const auto wa = waveArea();
+    if (has && ! rawView())
+    {
+        if (dotPos().getDistanceFrom (p) < 12.0f * u) return zDot;
+    }
+    else if (has && wa.expanded (0.0f, 14.0f * u).contains (p))
+    {
+        // la poignée la plus proche (les deux peuvent se toucher sur une syllabe très courte)
+        const float da = std::abs (p.x - handleX (0)), db = std::abs (p.x - handleX (1));
+        if (std::min (da, db) < 10.0f * u) return da <= db ? zHandleA : zHandleB;
+    }
+    if (wa.expanded (8.0f).contains (p)) return zWave;
     return none;
+}
+
+void RiserDisplay::updateTooltip()
+{
+    switch (hover)
+    {
+        case zFx:     setTooltip ("FX: the finished riser. This is what you drag into your DAW. Drag the dot on the curve to shape the build-up."); break;
+        case zRaw:    setTooltip ("RAW: everything that was recorded. Drag the two handles to choose the part (the syllable) the riser is made from. "
+                                  "LISTEN plays that part. Dragging the file out works in FX only."); break;
+        case zInput:  setTooltip ("INPUT: open or closed.\nOPEN: the next time your DAW plays the vocal, it is captured.\n"
+                                  "CLOSED: nothing new is recorded, your take stays exactly as it is. Close it once you have the take you want, "
+                                  "or when the exported riser sits on this same track."); break;
+        case zDot:    setTooltip ("Pre-fade: drag the dot down to start the riser quieter and make it arrive later, up to make it come in earlier. "
+                                  "Same as CURVE in EDIT."); break;
+        case zHandleA: case zHandleB:
+                      setTooltip ("Drag the handles to choose the part of your take the riser is made from: the riser ends exactly where it starts."); break;
+        case zListen: setTooltip ("LISTEN: FX plays the riser, RAW plays the part between the handles."); break;
+        default:      setTooltip ("Play your DAW over the vocal: it is captured automatically, the riser is ready when you stop. "
+                                  "Then grab the waveform and drop it in your DAW, at the bar shown."); break;
+    }
 }
 
 void RiserDisplay::mouseMove (const juce::MouseEvent& e)
 {
     const auto z = zoneAt (e.position);
-    if (z != hover) { hover = z; repaint(); }
+    if (z != hover) { hover = z; updateTooltip(); repaint(); }
     const bool ready = shown != nullptr && shown->riserSamples > 0;
-    setMouseCursor (z == zWave && ready ? juce::MouseCursor::DraggingHandCursor
-                                       : (z != none && z != zWave ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor));
+    juce::MouseCursor c = juce::MouseCursor::NormalCursor;
+    if (z == zWave && ready && ! rawView()) c = juce::MouseCursor::DraggingHandCursor;
+    else if (z == zDot) c = juce::MouseCursor::UpDownLeftRightResizeCursor;
+    else if (z == zHandleA || z == zHandleB) c = juce::MouseCursor::LeftRightResizeCursor;
+    else if (z != none && z != zWave) c = juce::MouseCursor::PointingHandCursor;
+    setMouseCursor (c);
 }
 
 void RiserDisplay::mouseExit (const juce::MouseEvent&)
 {
-    if (! dragging) { hover = none; repaint(); }
+    if (! dragging && dragZone == none) { hover = none; updateTooltip(); repaint(); }
 }
 
 void RiserDisplay::mouseDown (const juce::MouseEvent& e)
@@ -96,29 +172,59 @@ void RiserDisplay::mouseDown (const juce::MouseEvent& e)
     auto setPhrase = [this] (int delta)
     {
         if (shown == nullptr) return;
-        const int to = juce::jlimit (0, shown->phraseCount - 1, shown->phrase + delta);
-        if (auto* p = processor.apvts.getParameter (ids::phrase))
-        { p->beginChangeGesture(); p->setValueNotifyingHost (p->convertTo0to1 ((float) to)); p->endChangeGesture(); }
+        setParam (ids::phrase, (float) juce::jlimit (0, shown->phraseCount - 1, shown->phrase + delta));
     };
-    switch (zoneAt (e.position))
+    const auto z = zoneAt (e.position);
+    switch (z)
     {
         case zListen: processor.setListen (! processor.isListening()); break;
         case zLoop:  looping = ! looping; processor.loop = looping; repaint(); break;
         case zEdit:   editing = ! editing; if (onEdit) onEdit (editing); repaint(); break;
-        case zRaw:
-            if (auto* p = processor.apvts.getParameter (ids::raw))
-            { p->beginChangeGesture(); p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f); p->endChangeGesture(); repaint(); }
+        case zFx: case zRaw:
+            if ((z == zRaw) != rawView()) { processor.setListen (false); setParam (ids::raw, z == zRaw ? 1.0f : 0.0f); }
             break;
+        case zInput:  setParam (ids::inputOpen, processor.isInputOpen() ? 0.0f : 1.0f); repaint(); break;
         case zPrev:   setPhrase (-1); break;
         case zNext:   setPhrase (1); break;
+        case zDot:
+            dragZone = zDot;
+            if (auto* p = processor.apvts.getParameter (ids::curve)) p->beginChangeGesture();
+            break;
+        case zHandleA: case zHandleB:
+            dragZone = z;
+            selA = shown->srcStartSec;
+            selB = shown->srcEndSec;
+            break;
         case zWave: case none: default: break;
     }
 }
 
-// la forme d'onde se glisse directement dans le DAW
 void RiserDisplay::mouseDrag (const juce::MouseEvent& e)
 {
-    if (dragging || zoneAt (e.mouseDownPosition) != zWave || e.getDistanceFromDragStart() < 5) return;
+    const auto wa = waveArea();
+    if (dragZone == zDot)
+    {
+        // le point suit la souris : la courbe y = x^k passe par lui (k borné de 0 = plat à 3 = très creusé)
+        const float x = juce::jlimit (0.06f, 0.94f, (e.position.x - wa.getX()) / wa.getWidth());
+        const float y = juce::jlimit (0.001f, 1.0f, (wa.getBottom() - e.position.y) / (wa.getHeight() * 0.9f));
+        const float k = y >= 0.999f ? 0.0f : juce::jlimit (0.0f, 3.0f, std::log (y) / std::log (x));
+        processor.apvts.state.setProperty ("curveDotX", x, nullptr);
+        if (auto* p = processor.apvts.getParameter (ids::curve)) p->setValueNotifyingHost (p->convertTo0to1 (k / 3.0f * 100.0f));
+        repaint();
+        return;
+    }
+    if ((dragZone == zHandleA || dragZone == zHandleB) && shown != nullptr && shown->takeSec > 0.0)
+    {
+        const double t = juce::jlimit (0.0, shown->takeSec, (double) ((e.position.x - wa.getX()) / wa.getWidth()) * shown->takeSec);
+        const double minLen = 0.03;
+        if (dragZone == zHandleA) selA = juce::jlimit (0.0, selB - minLen, t);
+        else                      selB = juce::jlimit (selA + minLen, shown->takeSec, t);
+        processor.setTrim (selA, selB);   // la montée se recalcule pendant le geste
+        repaint();
+        return;
+    }
+    // la forme d'onde se glisse directement dans le DAW (vue FX)
+    if (dragging || rawView() || zoneAt (e.mouseDownPosition) != zWave || e.getDistanceFromDragStart() < 5) return;
     juce::String err;
     const auto file = processor.exportRiser (err);
     if (! file.existsAsFile()) { note = err.isNotEmpty() ? "PLAY YOUR DAW OVER THE VOCAL FIRST" : "NOTHING TO DRAG YET"; noteFrames = 180; repaint(); return; }
@@ -127,7 +233,13 @@ void RiserDisplay::mouseDrag (const juce::MouseEvent& e)
         container->performExternalDragDropOfFiles ({ file.getFullPathName() }, false, this, [this] { dragging = false; });
 }
 
-void RiserDisplay::mouseUp (const juce::MouseEvent&) { dragging = false; }
+void RiserDisplay::mouseUp (const juce::MouseEvent&)
+{
+    if (dragZone == zDot)
+        if (auto* p = processor.apvts.getParameter (ids::curve)) p->endChangeGesture();
+    dragZone = none;
+    dragging = false;
+}
 
 void RiserDisplay::tick()
 {
@@ -137,10 +249,16 @@ void RiserDisplay::tick()
     const double lp = processor.isListening() ? processor.listenPosition() : -1.0;
     const double rs = st == (int) OniriqueRiserAudioProcessor::Capture::recording ? processor.recordingSeconds() : 0.0;
     bool changed = r != shown || st != shownState || rend != rendering || std::abs (lp - listen) > 1.0e-4 || std::abs (rs - recSec) > 0.05;
-    if (r != shown) appear = 0.0f;
+    if (r != shown && (shown == nullptr || r == nullptr || std::abs (r->takeSec - shown->takeSec) > 1.0e-6)) appear = 0.0f;   // nouvelle prise
     shown = r; shownState = st; rendering = rend; listen = lp; recSec = rs;
+    // poignées lâchées : la sélection affichée redevient celle du calcul dès qu'il l'a rejointe (ou revenue à l'automatique)
+    if (selA >= 0.0 && dragZone == none && shown != nullptr
+        && (! shown->manualSource || (std::abs (shown->srcStartSec - selA) < 0.002 && std::abs (shown->srcEndSec - selB) < 0.002)) && ! rend)
+    { selA = selB = -1.0; changed = true; }
     changed |= ui::approach (appear, 1.0f, frozen ? 1.0f : 0.10f);
-    changed |= ui::approach (grab, hover == zWave || dragging ? 1.0f : 0.0f, 0.2f);
+    changed |= ui::approach (grab, (hover == zWave && ! rawView()) || dragging ? 1.0f : 0.0f, 0.2f);
+    changed |= ui::approach (view, rawView() ? 1.0f : 0.0f, frozen ? 1.0f : 0.2f);
+    changed |= ui::approach (inputLit, processor.isInputOpen() ? 1.0f : 0.0f, frozen ? 1.0f : 0.2f);
     if (noteFrames > 0 && --noteFrames == 0) { note.clear(); changed = true; }
     if (frozen) {}   // capture de la démo : image figée, identique d'une prise à l'autre
     else     if (st != 0 || rend || shown == nullptr || shown->riserSamples == 0) { pulse += 1.0f / 60.0f; changed = true; }
@@ -161,6 +279,8 @@ void RiserDisplay::paint (juce::Graphics& g)
     using Cap = OniriqueRiserAudioProcessor::Capture;
     const bool has = shown != nullptr && shown->riserSamples > 0;
     const juce::String sep (juce::CharPointer_UTF8 ("  \xc2\xb7  "));
+    const bool raw = rawView();
+    const bool inputOpen = processor.isInputOpen();
 
     // ---- titre (le sigil étoilé + ONIRIQUE RISER)
     {
@@ -203,43 +323,108 @@ void RiserDisplay::paint (juce::Graphics& g)
                     juce::Justification::centred, false);
     }
 
-    // ---- la montée : des traits verticaux qui grandissent jusqu'à la voix
     const auto wa = waveArea();
     const float mid = wa.getCentreY(), half = wa.getHeight() * 0.5f;
-    const int bars = 72;
-    const float step = wa.getWidth() / (float) bars, bw = std::max (1.0f, step * 0.38f);
     if (has)
     {
-        float pk = 1.0e-6f;
-        for (float v : shown->riserEnv) pk = std::max (pk, v);
-        const int N = (int) shown->riserEnv.size();
-        for (int b = 0; b < bars; ++b)
+        // ---- vue FX : la montée, des traits verticaux qui grandissent jusqu'à la voix, et la courbe de pré-fondu
+        if (view < 0.999f)
         {
-            const int i0 = b * N / bars, i1 = juce::jmax (i0 + 1, (b + 1) * N / bars);
-            float m = 0.0f;
-            for (int i = i0; i < i1 && i < N; ++i) m = std::max (m, shown->riserEnv[(size_t) i]);
-            const float t = (float) b / (float) (bars - 1);
-            const float h = std::max (1.5f * u, juce::jmin (1.0f, m / pk) * half * appear);
-            const float x = wa.getX() + step * ((float) b + 0.5f);
-            const bool played = listen >= 0.0 && listen >= t;
-            auto col = ui::haze.withAlpha (0.35f).interpolatedWith (ui::ember, 0.25f + 0.75f * t).interpolatedWith (ui::bone, 0.25f * grab * t);
-            if (played) col = ui::bone;
-            // lueur animée : une vague de lumière qui remonte vers la voix (plus vive quand on attrape la montée)
-            const float wave = 0.5f + 0.5f * std::sin (t * 9.0f - pulse * 2.2f);
-            const float glowA = (0.10f + 0.22f * grab) * t * (0.35f + 0.65f * wave * wave);
-            if (glowA > 0.01f)
+            const float a = 1.0f - view;
+            const int bars = 72;
+            const float step = wa.getWidth() / (float) bars, bw = std::max (1.0f, step * 0.38f);
+            float pk = 1.0e-6f;
+            for (float v : shown->riserEnv) pk = std::max (pk, v);
+            const int N = (int) shown->riserEnv.size();
+            for (int b = 0; b < bars; ++b)
             {
-                g.setColour (ui::ember.withAlpha (glowA));
-                g.fillRoundedRectangle (juce::Rectangle<float> (x - bw * 1.6f, mid - h - 2.0f * u, bw * 3.2f, 2.0f * h + 4.0f * u), bw * 1.6f);
+                const int i0 = b * N / bars, i1 = juce::jmax (i0 + 1, (b + 1) * N / bars);
+                float m = 0.0f;
+                for (int i = i0; i < i1 && i < N; ++i) m = std::max (m, shown->riserEnv[(size_t) i]);
+                const float t = (float) b / (float) (bars - 1);
+                const float h = std::max (1.5f * u, juce::jmin (1.0f, m / pk) * half * appear);
+                const float x = wa.getX() + step * ((float) b + 0.5f);
+                const bool played = ! raw && listen >= 0.0 && listen >= t;
+                auto col = ui::haze.withAlpha (0.35f).interpolatedWith (ui::ember, 0.25f + 0.75f * t).interpolatedWith (ui::bone, 0.25f * grab * t);
+                if (played) col = ui::bone;
+                // lueur animée : une vague de lumière qui remonte vers la voix (plus vive quand on attrape la montée)
+                const float wave = 0.5f + 0.5f * std::sin (t * 9.0f - pulse * 2.2f);
+                const float glowA = (0.10f + 0.22f * grab) * t * (0.35f + 0.65f * wave * wave) * a;
+                if (glowA > 0.01f)
+                {
+                    g.setColour (ui::ember.withAlpha (glowA));
+                    g.fillRoundedRectangle (juce::Rectangle<float> (x - bw * 1.6f, mid - h - 2.0f * u, bw * 3.2f, 2.0f * h + 4.0f * u), bw * 1.6f);
+                }
+                g.setColour (col.withMultipliedAlpha (a));
+                g.fillRoundedRectangle (juce::Rectangle<float> (x - bw * 0.5f, mid - h, bw, 2.0f * h), bw * 0.5f);
             }
-            g.setColour (col);
-            g.fillRoundedRectangle (juce::Rectangle<float> (x - bw * 0.5f, mid - h, bw, 2.0f * h), bw * 0.5f);
+            // la voix commence ici
+            g.setColour (ui::bone.withAlpha (0.8f * a));
+            g.fillRect (juce::Rectangle<float> (wa.getRight() + 3.0f * u, wa.getY() + wa.getHeight() * 0.1f, 1.2f * u, wa.getHeight() * 0.8f));
+            g.setFont (ui::font (ui::Face::mono, 8.5f * u, true, 0.12f));
+            g.drawText ("VOICE", juce::Rectangle<float> (wa.getRight() + 7.0f * u, wa.getY() + wa.getHeight() * 0.1f, 40.0f * u, 10.0f * u), juce::Justification::centredLeft, false);
+
+            // courbe de pré-fondu : du silence (en bas à gauche) jusqu'à la voix (en haut à droite), y = x^k, et son point
+            const float k = curveExponent();
+            juce::Path curve;
+            for (int i = 0; i <= 64; ++i)
+            {
+                const float t = (float) i / 64.0f;
+                const float y = k <= 0.0f ? 1.0f : std::pow (t, k);
+                const juce::Point<float> pt (wa.getX() + t * wa.getWidth(), wa.getBottom() - y * wa.getHeight() * 0.9f);   // le haut de la courbe (pas de pré-fondu) reste dans le cadre
+                if (i == 0) curve.startNewSubPath (pt); else curve.lineTo (pt);
+            }
+            const float hl = hover == zDot || dragZone == zDot ? 1.0f : 0.0f;
+            g.setColour (kRose.withAlpha ((0.45f + 0.35f * hl) * a));
+            g.strokePath (curve, juce::PathStrokeType (std::max (1.0f, 1.2f * u), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const auto d = dotPos();
+            const float r = (5.5f + 1.5f * hl) * u;
+            g.setColour (ui::night.withAlpha (a));
+            g.fillEllipse (juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre (d));
+            g.setColour ((hl > 0.5f ? ui::bone : kRose).withAlpha (a));
+            g.drawEllipse (juce::Rectangle<float> (2.0f * r, 2.0f * r).withCentre (d), std::max (1.0f, 1.4f * u));
+            g.fillEllipse (juce::Rectangle<float> (r * 0.7f, r * 0.7f).withCentre (d));
         }
-        // la voix commence ici
-        g.setColour (ui::bone.withAlpha (0.8f));
-        g.fillRect (juce::Rectangle<float> (wa.getRight() + 3.0f * u, wa.getY() + wa.getHeight() * 0.1f, 1.2f * u, wa.getHeight() * 0.8f));
-        g.setFont (ui::font (ui::Face::mono, 8.5f * u, true, 0.12f));
-        g.drawText ("VOICE", juce::Rectangle<float> (wa.getRight() + 7.0f * u, wa.getY() + wa.getHeight() * 0.1f, 40.0f * u, 10.0f * u), juce::Justification::centredLeft, false);
+
+        // ---- vue RAW : toute la prise, la partie choisie entre deux poignées
+        if (view > 0.001f && ! shown->takeEnv.empty())
+        {
+            const float a = view;
+            const int bars = 120;
+            const float step = wa.getWidth() / (float) bars, bw = std::max (1.0f, step * 0.42f);
+            float pk = 1.0e-6f;
+            for (float v : shown->takeEnv) pk = std::max (pk, v);
+            const int N = (int) shown->takeEnv.size();
+            const float xa = handleX (0), xb = handleX (1);
+            g.setColour (juce::Colours::white.withAlpha (0.035f * a));
+            g.fillRect (juce::Rectangle<float> (xa, wa.getY() - 10.0f * u, xb - xa, wa.getHeight() + 20.0f * u));
+            for (int b = 0; b < bars; ++b)
+            {
+                const int i0 = b * N / bars, i1 = juce::jmax (i0 + 1, (b + 1) * N / bars);
+                float m = 0.0f;
+                for (int i = i0; i < i1 && i < N; ++i) m = std::max (m, shown->takeEnv[(size_t) i]);
+                const float x = wa.getX() + step * ((float) b + 0.5f);
+                const float h = std::max (1.2f * u, juce::jmin (1.0f, m / pk) * half * appear);
+                const bool inside = x >= xa && x <= xb;
+                const auto col = inside ? (raw && listen >= 0.0 ? ui::bone : ui::ember.interpolatedWith (ui::bone, 0.25f)) : ui::haze.withAlpha (0.30f);
+                g.setColour (col.withMultipliedAlpha (a));
+                g.fillRoundedRectangle (juce::Rectangle<float> (x - bw * 0.5f, mid - h, bw, 2.0f * h), bw * 0.5f);
+            }
+            for (int w = 0; w < 2; ++w)
+            {
+                const float x = w == 0 ? xa : xb;
+                const bool hl = hover == (w == 0 ? zHandleA : zHandleB) || dragZone == (w == 0 ? zHandleA : zHandleB);
+                g.setColour ((hl ? ui::bone : ui::ember).withAlpha (a));
+                g.fillRect (juce::Rectangle<float> (x - 0.7f * u, wa.getY() - 10.0f * u, 1.4f * u, wa.getHeight() + 20.0f * u));
+                const auto grip = juce::Rectangle<float> (11.0f * u, 26.0f * u).withCentre ({ x, mid });
+                g.setColour (ui::night.withAlpha (a));
+                g.fillRoundedRectangle (grip, 5.5f * u);
+                g.setColour ((hl ? ui::bone : ui::ember).withAlpha (a));
+                g.drawRoundedRectangle (grip, 5.5f * u, std::max (1.0f, 1.3f * u));
+                for (float dx : { -1.8f, 1.8f })
+                    g.fillRect (juce::Rectangle<float> (x + dx * u - 0.5f * u, mid - 6.0f * u, 1.0f * u, 12.0f * u));
+            }
+        }
     }
     else
     {
@@ -267,14 +452,21 @@ void RiserDisplay::paint (juce::Graphics& g)
         else if (shownState == (int) Cap::recording) { t = "CAPTURING THE VOICE" + sep + juce::String (recSec, 1) + " s"; c = ui::ember.withAlpha (0.55f + 0.45f * beat); }
         else if (shownState == (int) Cap::listening) t = "LISTENING" + sep + "WAITING FOR THE VOICE";
         else if (rendering) t = "BUILDING THE RISER";
+        else if (has && raw)
+        {
+            const double a0 = selA >= 0.0 ? selA : shown->srcStartSec, b0 = selA >= 0.0 ? selB : shown->srcEndSec;
+            t = "SOURCE " + juce::String (b0 - a0, 2) + " s OF " + juce::String (shown->takeSec, 1) + " s" + sep + "DRAG THE HANDLES";
+            c = ui::mist;
+        }
         else if (has) { t = shown->hasGrid ? "DRAG IT TO BAR " + juce::String (shown->dropBar) + sep + "BEAT " + juce::String (shown->dropBeat) : "DRAG IT: IT ENDS ON THE VOICE"; c = grab > 0.5f ? ui::bone : ui::mist; }
+        else if (! inputOpen) { t = "INPUT CLOSED" + sep + "OPEN IT TO CAPTURE YOUR VOCAL"; c = kRose; }
         else t = "PRESS PLAY IN YOUR DAW";
         g.setColour (c);
-        g.setFont (ui::fitFont (ui::Face::mono, 10.5f * u, area.getWidth() * 0.6f, t, true, 0.1f));
+        g.setFont (ui::fitFont (ui::Face::mono, 10.5f * u, area.getWidth() * 0.7f, t, true, 0.1f));
         g.drawText (t, juce::Rectangle<float> (area.getX(), wa.getBottom() + 6.0f * u, area.getWidth(), 16.0f * u), juce::Justification::centred, false);
     }
 
-    // ---- LISTEN, LOOP (à gauche), EDIT (à droite)
+    // ---- LISTEN, LOOP (à gauche), FX | RAW, INPUT, EDIT (à droite)
     auto textButton = [&] (juce::Rectangle<float> r, const juce::String& txt, bool on, bool hl, int icon)
     {
         const auto col = on ? ui::ember : (hl ? ui::bone : ui::haze);
@@ -297,7 +489,44 @@ void RiserDisplay::paint (juce::Graphics& g)
     textButton (listenZone(), "LISTEN", listen >= 0.0, hover == zListen, 0);
     textButton (loopZone(), "LOOP", looping, hover == zLoop, 1);
     textButton (editZone(), "EDIT", editing, hover == zEdit, -1);
-    textButton (rawZone(), "RAW", processor.apvts.getRawParameterValue (ids::raw)->load() > 0.5f, hover == zRaw, -1);
+
+    // FX | RAW : la pastille braise glisse vers la vue choisie
+    {
+        const auto r = fxZone().getUnion (rawZone());
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+        g.setColour (ui::line);
+        g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, std::max (1.0f, u));
+        const auto pill = fxZone().translated (view * fxZone().getWidth(), 0.0f).reduced (2.0f * u);
+        g.setGradientFill (juce::ColourGradient (ui::ember.withAlpha (0.55f), pill.getX(), pill.getY(), ui::blood, pill.getX(), pill.getBottom(), false));
+        g.fillRoundedRectangle (pill, pill.getHeight() * 0.5f);
+        g.setFont (ui::font (ui::Face::mono, 10.0f * u, true, 0.14f));
+        for (int i = 0; i < 2; ++i)
+        {
+            const bool on = (i == 1) == raw;
+            const bool hl = hover == (i == 0 ? zFx : zRaw);
+            g.setColour (on ? ui::bone : (hl ? ui::mist : ui::haze));
+            g.drawText (i == 0 ? "FX" : "RAW", i == 0 ? fxZone() : rawZone(), juce::Justification::centred, false);
+        }
+    }
+
+    // INPUT OPEN / CLOSED : pastille au liseré braise quand elle est ouverte
+    {
+        const auto r = inputZone().reduced (0.0f, 1.0f);
+        const bool hl = hover == zInput;
+        g.setColour (ui::ember.withAlpha (0.10f * inputLit + (hl ? 0.06f : 0.0f)));
+        g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+        g.setColour (ui::line.interpolatedWith (ui::ember, 0.85f * inputLit).interpolatedWith (ui::bone, hl ? 0.25f : 0.0f));
+        g.drawRoundedRectangle (r.reduced (0.5f), r.getHeight() * 0.5f, std::max (1.0f, 1.2f * u));
+        const float d = 5.0f * u;
+        const auto led = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + r.getHeight() * 0.55f, r.getCentreY() });
+        g.setColour (ui::haze.withAlpha (0.4f).interpolatedWith (ui::ember, inputLit));
+        g.fillEllipse (led);
+        g.setColour (ui::haze.interpolatedWith (ui::bone, juce::jmax (inputLit, hl ? 0.6f : 0.0f)));
+        g.setFont (ui::font (ui::Face::mono, 9.5f * u, true, 0.12f));
+        g.drawText (inputOpen ? "INPUT OPEN" : "INPUT CLOSED", r.withTrimmedLeft (r.getHeight() * 0.9f).withTrimmedRight (6.0f * u),
+                    juce::Justification::centred, false);
+    }
 }
 
 //==============================================================================
@@ -607,6 +836,8 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
         if (t.contains ("demo")) processor.loadTestTake();
         if (t.contains ("static")) display.frozen = true;
         if (t.contains ("edit")) { display.setEditing (true); showEdit (true); }
+        if (t.contains ("rawview")) if (auto* prm = processor.apvts.getParameter (ids::raw)) prm->setValueNotifyingHost (1.0f);
+        if (t.contains ("closed")) if (auto* prm = processor.apvts.getParameter (ids::inputOpen)) prm->setValueNotifyingHost (0.0f);
         if (t.contains ("fxmenu")) juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<OniriqueRiserAudioProcessorEditor> (this)] { if (sp != nullptr && sp->tremolo.onText) sp->tremolo.onText(); });
     }
    #endif
