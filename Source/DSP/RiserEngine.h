@@ -16,7 +16,8 @@ namespace onirique
     commence, de la durée choisie en temps et en mesures au tempo du morceau.
 
     1. Les phrases : enveloppe RMS (10 ms) ; une phrase commence là où le son revient après au moins 250 ms de silence
-       (seuil : 35 dB sous le plus fort passage de la prise, jamais sous -50 dBFS).
+       (seuil : 35 dB sous le plus fort passage de la prise, jamais sous -50 dBFS) ; une phrase qui n'atteint jamais 24 dB
+       sous le plus fort passage (respiration, bruit avant le mot) est écartée : la montée se cale sur la vraie voix.
     2. La SOURCE : le début de la phrase choisie (SOURCE temps), ou la partie de la prise choisie à la main entre les
        deux poignées de la vue RAW (la montée finit alors là où elle commence), adoucie à la fin. Avec S-CLEAN, ses S sont retirés deux
        fois : le de-esser de la VOCALBOX à fond, puis, dans l'envoi vers la reverb seulement, un détecteur de sifflantes
@@ -125,6 +126,7 @@ public:
             peak = std::max (peak, r);
         }
         std::vector<int> onsets;
+        std::vector<float> loudest;   // le plus fort passage de chaque phrase candidate
         if (peak <= 0.0f) return onsets;
         const float thr = std::max (dbToGain (-50.0f), peak * dbToGain (-35.0f));
         const int minGap = (int) std::ceil (0.25 * fs / hop);
@@ -135,6 +137,7 @@ public:
             {
                 if (quiet >= minGap)
                 {
+                    loudest.push_back (0.0f);
                     // affinage : premier échantillon au-dessus d'un seuil plus bas, dans la trame d'avant
                     int s = juce::jmax (0, (f - 1) * hop);
                     const float fine = thr * 0.5f;
@@ -146,12 +149,19 @@ public:
                     }
                     onsets.push_back (s);
                 }
+                loudest.back() = std::max (loudest.back(), rms[(size_t) f]);
                 quiet = 0;
             }
             else
                 ++quiet;
         }
-        return onsets;
+        // une phrase doit devenir de la voix : un passage qui n'atteint jamais 24 dB sous le plus fort de la prise
+        // (respiration, bruit de bouche, souffle avant le mot, frottement) n'en est pas une. Sans ce tri, la montée se
+        // calait sur ce bruit, avant le vrai début du mot.
+        std::vector<int> voiced;
+        for (size_t k = 0; k < onsets.size(); ++k)
+            if (loudest[k] >= peak * dbToGain (-24.0f)) voiced.push_back (onsets[k]);
+        return voiced;
     }
 
     static RiserResult render (const RiserCapture& cap, const RiserSettings& st)

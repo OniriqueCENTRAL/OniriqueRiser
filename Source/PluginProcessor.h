@@ -68,6 +68,9 @@ public:
     bool isListening() const noexcept { return listenOn.load(); }
     double listenPosition() const noexcept { return listenPos.load(); }   // 0..1 : position dans la montée
     std::atomic<bool> loop { false };
+    // + VOICE : en vue FX, LISTEN enchaîne la montée puis le début de la voix (2 s), pour entendre la jonction ; le fichier
+    // glissé dans le DAW, lui, ne contient jamais la voix
+    std::atomic<bool> listenVoice { false };
     // la source choisie à la main dans la vue RAW (secondes depuis le début de la prise) ; resetTrim : automatique
     // (début de la phrase, durée SOURCE). Une nouvelle prise, une autre phrase ou un autre SOURCE reviennent à l'automatique.
     void setTrim (double startSec, double endSec) { trimA = startSec; trimB = endSec; }

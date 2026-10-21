@@ -25,9 +25,9 @@ public:
     void setEditing (bool e) { editing = e; repaint(); }
 
 private:
-    enum Zone { none = -1, zListen, zLoop, zEdit, zFx, zRaw, zInput, zPrev, zNext, zDot, zHandleA, zHandleB, zWave };
+    enum Zone { none = -1, zListen, zLoop, zVoice, zEdit, zFx, zRaw, zInput, zPrev, zNext, zDot, zHandleA, zHandleB, zWave };
     Zone zoneAt (juce::Point<float>) const;
-    juce::Rectangle<float> waveArea() const, listenZone() const, loopZone() const, editZone() const, fxZone() const, rawZone() const,
+    juce::Rectangle<float> waveArea() const, listenZone() const, loopZone() const, voiceZone() const, editZone() const, fxZone() const, rawZone() const,
                            inputZone() const, prevZone() const, nextZone() const;
     bool rawView() const;
     float curveExponent() const;                 // pré-fondu : gain t^k, k = 3 CURVE

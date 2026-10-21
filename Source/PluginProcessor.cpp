@@ -237,11 +237,15 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     }
     else if (usable && ! playing && listenOn.load())
     {
-        // vue FX : la montée seule (sans la voix qui suit) ; vue RAW : la partie de la prise choisie entre les poignées
+        // vue FX : la montée seule, ou (+ VOICE) la montée puis le début de la voix, enchaînés à l'échantillon près comme
+        // dans le DAW ; vue RAW : la partie de la prise choisie entre les poignées
         const bool rawView = apvts.getRawParameterValue (ids::raw)->load() > 0.5f;
         const auto& src = rawView ? res->sourceAudio : res->riser;
         const int from = rawView ? 0 : res->padSamples;
-        const int total = juce::jmax (0, src.getNumSamples() - from);
+        const int main = juce::jmax (0, src.getNumSamples() - from);
+        const auto& voice = res->voiceAfter;
+        const int extra = ! rawView && listenVoice.load() ? voice.getNumSamples() : 0;
+        const int total = main + extra;
         for (int i = 0; i < n; ++i)
         {
             if (listenIdx >= total)
@@ -250,10 +254,11 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
                 listenIdx = 0;
             }
             for (int c = 0; c < numCh; ++c)
-                buffer.addSample (c, i, src.getSample (juce::jmin (c, src.getNumChannels() - 1), from + listenIdx));
+                buffer.addSample (c, i, listenIdx < main ? src.getSample (juce::jmin (c, src.getNumChannels() - 1), from + listenIdx)
+                                                         : voice.getSample (juce::jmin (c, voice.getNumChannels() - 1), listenIdx - main));
             ++listenIdx;
         }
-        listenPos = total > 0 ? (double) listenIdx / total : 0.0;
+        listenPos = main > 0 ? juce::jmin (1.0, (double) listenIdx / main) : 0.0;   // le curseur suit la montée
     }
     else
         bypassMix.skip (n);

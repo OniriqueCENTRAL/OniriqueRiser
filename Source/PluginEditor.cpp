@@ -49,17 +49,19 @@ juce::Rectangle<float> RiserDisplay::editZone() const
     return { (float) getWidth() - 16.0f * u - 54.0f * u, (float) getHeight() - 34.0f * u, 54.0f * u, 24.0f * u };
 }
 // FX | RAW : la vue, juste après LOOP
+// + VOICE : juste après LOOP (l'écoute enchaîne la montée et le début de la voix)
+juce::Rectangle<float> RiserDisplay::voiceZone() const { return loopZone().translated (loopZone().getWidth() + 6.0f * ui::editorScale (*this), 0.0f).withWidth (58.0f * ui::editorScale (*this)); }
 juce::Rectangle<float> RiserDisplay::fxZone() const
 {
     const float u = ui::editorScale (*this);
-    return { loopZone().getRight() + 14.0f * u, (float) getHeight() - 34.0f * u, 46.0f * u, 24.0f * u };
+    return { voiceZone().getRight() + 10.0f * u, (float) getHeight() - 34.0f * u, 46.0f * u, 24.0f * u };
 }
 juce::Rectangle<float> RiserDisplay::rawZone() const { return fxZone().translated (fxZone().getWidth(), 0.0f); }
 // INPUT OPEN / CLOSED : à gauche d'EDIT
 juce::Rectangle<float> RiserDisplay::inputZone() const
 {
     const float u = ui::editorScale (*this);
-    return editZone().translated (-126.0f * u, 0.0f).withWidth (116.0f * u);
+    return editZone().translated (-112.0f * u, 0.0f).withWidth (104.0f * u);
 }
 juce::Rectangle<float> RiserDisplay::prevZone() const
 {
@@ -108,6 +110,7 @@ RiserDisplay::Zone RiserDisplay::zoneAt (juce::Point<float> p) const
     const bool many = has && shown->phraseCount > 1;
     if (listenZone().contains (p)) return zListen;
     if (loopZone().contains (p)) return zLoop;
+    if (voiceZone().contains (p)) return zVoice;
     if (editZone().contains (p)) return zEdit;
     if (inputZone().contains (p)) return zInput;
     if (fxZone().contains (p)) return zFx;
@@ -144,6 +147,8 @@ void RiserDisplay::updateTooltip()
         case zHandleA: case zHandleB:
                       setTooltip ("Drag the handles to choose the part of your take the riser is made from: the riser ends exactly where it starts."); break;
         case zListen: setTooltip ("LISTEN: FX plays the riser, RAW plays the part between the handles."); break;
+        case zVoice:  setTooltip ("+ VOICE: LISTEN plays the riser and then the start of your vocal, exactly as in your DAW, to hear how it lands "
+                                  "on the word. The file you drag never contains the vocal."); break;
         default:      setTooltip ("Play your DAW over the vocal: it is captured automatically, the riser is ready when you stop. "
                                   "Then grab the waveform and drop it in your DAW, at the bar shown."); break;
     }
@@ -179,6 +184,7 @@ void RiserDisplay::mouseDown (const juce::MouseEvent& e)
     {
         case zListen: processor.setListen (! processor.isListening()); break;
         case zLoop:  looping = ! looping; processor.loop = looping; repaint(); break;
+        case zVoice: processor.listenVoice = ! processor.listenVoice.load(); repaint(); break;
         case zEdit:   editing = ! editing; if (onEdit) onEdit (editing); repaint(); break;
         case zFx: case zRaw:
             if ((z == zRaw) != rawView()) { processor.setListen (false); setParam (ids::raw, z == zRaw ? 1.0f : 0.0f); }
@@ -484,10 +490,11 @@ void RiserDisplay::paint (juce::Graphics& g)
         if (! p.isEmpty()) { g.setColour (col); g.fillPath (p); }
         g.setColour (col);
         g.setFont (ui::font (ui::Face::mono, 10.0f * u, true, 0.14f));
-        g.drawText (txt, r.withTrimmedLeft (icon >= 0 ? ic * 1.6f : 0.0f), icon >= 0 ? juce::Justification::centredLeft : juce::Justification::centredRight, false);
+        g.drawText (txt, r.withTrimmedLeft (icon >= 0 ? ic * 1.6f : 0.0f), icon == -1 ? juce::Justification::centredRight : juce::Justification::centredLeft, false);
     };
     textButton (listenZone(), "LISTEN", listen >= 0.0, hover == zListen, 0);
     textButton (loopZone(), "LOOP", looping, hover == zLoop, 1);
+    textButton (voiceZone(), "+ VOICE", processor.listenVoice.load() && ! raw, hover == zVoice && ! raw, -2);
     textButton (editZone(), "EDIT", editing, hover == zEdit, -1);
 
     // FX | RAW : la pastille braise glisse vers la vue choisie
