@@ -403,7 +403,7 @@ void RiserDisplay::paint (juce::Graphics& g)
             const int N = (int) shown->takeEnv.size();
             const float xa = handleX (0), xb = handleX (1);
             g.setColour (juce::Colours::white.withAlpha (0.035f * a));
-            g.fillRect (juce::Rectangle<float> (xa, wa.getY() - 10.0f * u, xb - xa, wa.getHeight() + 20.0f * u));
+            g.fillRect (juce::Rectangle<float> (xa, wa.getY() - 6.0f * u, xb - xa, wa.getHeight() + 12.0f * u));
             for (int b = 0; b < bars; ++b)
             {
                 const int i0 = b * N / bars, i1 = juce::jmax (i0 + 1, (b + 1) * N / bars);
@@ -421,7 +421,7 @@ void RiserDisplay::paint (juce::Graphics& g)
                 const float x = w == 0 ? xa : xb;
                 const bool hl = hover == (w == 0 ? zHandleA : zHandleB) || dragZone == (w == 0 ? zHandleA : zHandleB);
                 g.setColour ((hl ? ui::bone : ui::ember).withAlpha (a));
-                g.fillRect (juce::Rectangle<float> (x - 0.7f * u, wa.getY() - 10.0f * u, 1.4f * u, wa.getHeight() + 20.0f * u));
+                g.fillRect (juce::Rectangle<float> (x - 0.7f * u, wa.getY() - 6.0f * u, 1.4f * u, wa.getHeight() + 12.0f * u));
                 const auto grip = juce::Rectangle<float> (11.0f * u, 26.0f * u).withCentre ({ x, mid });
                 g.setColour (ui::night.withAlpha (a));
                 g.fillRoundedRectangle (grip, 5.5f * u);
@@ -469,7 +469,7 @@ void RiserDisplay::paint (juce::Graphics& g)
         else t = "PRESS PLAY IN YOUR DAW";
         g.setColour (c);
         g.setFont (ui::fitFont (ui::Face::mono, 10.5f * u, area.getWidth() * 0.7f, t, true, 0.1f));
-        g.drawText (t, juce::Rectangle<float> (area.getX(), wa.getBottom() + 6.0f * u, area.getWidth(), 16.0f * u), juce::Justification::centred, false);
+        g.drawText (t, juce::Rectangle<float> (area.getX(), wa.getBottom() + (6.0f + 5.0f * view) * u, area.getWidth(), 16.0f * u), juce::Justification::centred, false);
     }
 
     // ---- LISTEN, LOOP (à gauche), FX | RAW, INPUT, EDIT (à droite)
