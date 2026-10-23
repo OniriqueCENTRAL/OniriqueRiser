@@ -41,7 +41,14 @@ public:
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    // LISTEN et IN SYNC jouent la montée pendant que la piste n'envoie que du silence (DAW à l'arrêt, ou juste avant la
+    // voix) : annoncée sans queue, le RISER était mis en veille par le DAW (Logic, Cubase…) dès que l'entrée se taisait,
+    // et LISTEN ne jouait rien. Queue infinie en VST2 / VST3 (prévu par ces formats) ; 30 s en AU (une queue infinie
+    // n'y est pas prévue), assez pour écouter la montée et sa voix après l'arrêt.
+    double getTailLengthSeconds() const override
+    {
+        return wrapperType == wrapperType_AudioUnit ? 30.0 : std::numeric_limits<double>::infinity();
+    }
 
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
