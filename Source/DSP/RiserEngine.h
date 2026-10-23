@@ -7,6 +7,7 @@
 #include "Common.h"
 #include "DeEsser.h"
 #include "VocalFX.h"
+#include "VoiceReverb.h"
 
 namespace onirique
 {
@@ -228,27 +229,28 @@ public:
         for (int c = 0; c < 2; ++c)
             for (int i = 0; i < S; ++i) in.setSample (c, i, send.getSample (c, S - 1 - i));
         {
-            fx::VocalReverb rv;
-            fx::VocalReverb::Params p;
-            static constexpr int modes[] { fx::VocalReverb::room, fx::VocalReverb::plate1, fx::VocalReverb::plate2, fx::VocalReverb::hall, fx::VocalReverb::shimmer };
-            p.on = true;
+            // la reverb de VOCALBOX et VOCAL MINI (mêmes cinq espaces), réglée pour une reverse reverb : toute la queue
+            // compte, donc ni CLEAN (qui couperait la queue à la fin de la phrase) ni ducking ; envoi à 100 % d'emblée
+            mini::VoiceReverb rv;
+            mini::VoiceReverb::Params p;
+            static constexpr int modes[] { mini::VoiceReverb::room, mini::VoiceReverb::plate1, mini::VoiceReverb::plate2, mini::VoiceReverb::hall, mini::VoiceReverb::shimmer };
             p.mode = modes[juce::jlimit (0, 4, st.space)];
+            p.send = 1.0f;
             p.preDelayMs = 0.0f;
             p.decay = (float) juce::jlimit (0.8, 20.0, (R / fs) * (0.8 + 1.8 * (double) st.size));
             p.size = 0.55f + 0.4f * st.size;
             p.diffusion = 0.85f;
             p.modRate = 0.6f; p.modDepth = 0.3f;
-            p.mix = 1.0f;
-            p.lowCut = 160.0f; p.highCut = 9500.0f; p.ducking = 0.0f;
-            rv.set (p);
+            p.lowCut = 160.0f; p.highCut = 9500.0f; p.width = 1.0f;
+            p.ducking = 0.0f; p.clean = 0.0f; p.pulse = 0.0f;
             rv.prepare (fs);
-            rv.set (p);
+            rv.set (p, true);
             for (int pos = 0; pos < L; pos += 512)
             {
                 const int m = juce::jmin (512, L - pos);
                 const float* ip[2] { in.getReadPointer (0, pos), in.getReadPointer (1, pos) };
                 float* wp[2] { wet.getWritePointer (0, pos), wet.getWritePointer (1, pos) };
-                rv.processSend (ip, wp, 2, m);
+                rv.process (ip, wp, 2, m, 120.0, -1.0);
             }
         }
         // retour retourné : l'attaque de la voix (src[0]) tombe en L - S ; la montée est juste avant
