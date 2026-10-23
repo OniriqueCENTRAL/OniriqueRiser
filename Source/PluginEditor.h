@@ -133,6 +133,7 @@ private:
     void mouseDown (const juce::MouseEvent&) override;   // un clic ailleurs ferme le menu d'un effet
 
     OniriqueRiserAudioProcessor& processor;
+    onirique::ui::FontScope fontScope;   // polices de la charte, le temps que l'interface est ouverte
     OniriqueLookAndFeel lnf;
     juce::TooltipWindow tooltipWindow { this, 600 };
 

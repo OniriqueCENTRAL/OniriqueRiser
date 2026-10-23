@@ -277,7 +277,10 @@ void RiserDisplay::paint (juce::Graphics& g)
     const float u = ui::editorScale (*this);
     const auto area = getLocalBounds().toFloat();
     const float rad = 14.0f * u;
-    g.setGradientFill (juce::ColourGradient (ui::deep2.withAlpha (0.92f), 0.0f, 0.0f, ui::night, 0.0f, area.getBottom(), false));
+    // verre sombre (DA PRO SERIES) : charbon, reflet rose pâle très léger en haut, filet fin
+    g.setColour (ui::night.withAlpha (0.85f));
+    g.fillRoundedRectangle (area, rad);
+    g.setGradientFill (juce::ColourGradient (ui::lilac.withAlpha (0.035f), 0.0f, 0.0f, ui::lilac.withAlpha (0.0f), 0.0f, area.getHeight() * 0.7f, false));
     g.fillRoundedRectangle (area, rad);
     g.setColour (ui::line);
     g.drawRoundedRectangle (area.reduced (0.5f), rad, std::max (1.0f, u));
@@ -298,12 +301,12 @@ void RiserDisplay::paint (juce::Graphics& g)
         star.lineTo (c.x, c.y + s); star.lineTo (c.x - k, c.y + k); star.lineTo (c.x - s, c.y); star.lineTo (c.x - k, c.y - k); star.closeSubPath();
         g.setColour (ui::ember);
         g.fillPath (star);
-        auto f1 = ui::font (ui::Face::display, 13.0f * u, false, 0.22f), f2 = ui::font (ui::Face::display, 13.0f * u, true, 0.22f);
-        const float w1 = ui::textWidth (f1, "ONIRIQUE") + 4.0f * u;
-        g.setColour (ui::haze);
+        auto f1 = ui::font (ui::Face::display, 13.0f * u, false, 0.08f), f2 = ui::font (ui::Face::display, 13.0f * u, true, 0.08f);
+        const float w1 = ui::textWidth (f1, "ONIRIQUE") + 6.0f * u;
+        g.setColour (ui::mist);
         g.setFont (f1);
         g.drawText ("ONIRIQUE", juce::Rectangle<float> (34.0f * u, 10.0f * u, w1, 24.0f * u), juce::Justification::centredLeft, false);
-        g.setColour (ui::bone);
+        g.setColour (ui::ember);
         g.setFont (f2);
         g.drawText ("RISER", juce::Rectangle<float> (34.0f * u + w1, 10.0f * u, 80.0f * u, 24.0f * u), juce::Justification::centredLeft, false);
     }
@@ -956,29 +959,30 @@ void OniriqueRiserAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Graphics bg (backdropLayer);
         bg.addTransform (juce::AffineTransform::scale (ps));
         const float W = (float) getWidth(), H = (float) getHeight();
+        // DA PRO SERIES : noir profond, lueurs rouges très discrètes, grain fin, carte de verre sombre
         bg.fillAll (ui::night);
-        bg.setGradientFill (juce::ColourGradient (ui::blood.withAlpha (0.75f), 0.0f, 0.0f, ui::night.withAlpha (0.0f), 0.0f, H * 0.55f, false));
+        bg.setGradientFill (juce::ColourGradient (ui::blood.withAlpha (0.55f), W * 0.3f, H * 0.42f, ui::night.withAlpha (0.0f), W * 0.3f + W * 0.75f, H * 0.42f, true));
         bg.fillRect (getLocalBounds());
-        bg.setGradientFill (juce::ColourGradient (ui::ember.withAlpha (0.16f), W * 0.8f, -30.0f * u, ui::ember.withAlpha (0.0f), W * 1.2f, -30.0f * u, true));
+        bg.setGradientFill (juce::ColourGradient (ui::blood.withAlpha (0.22f), W * 0.92f, H * 1.05f, ui::night.withAlpha (0.0f), W * 0.92f - W * 0.6f, H * 1.05f, true));
         bg.fillRect (getLocalBounds());
+        {
+            juce::Random rnd (21);
+            for (int i = 0; i < 70; ++i)
+            {
+                const float x = rnd.nextFloat() * W, y = rnd.nextFloat() * H, s = (0.5f + 1.2f * rnd.nextFloat() * rnd.nextFloat()) * u;
+                bg.setColour (ui::mist.withAlpha (0.03f + 0.07f * rnd.nextFloat()));
+                bg.fillEllipse (x, y, s, s);
+            }
+        }
         juce::Path card;
-        card.addRoundedRectangle (cardRect, 18.0f * u);
+        card.addRoundedRectangle (cardRect, 14.0f * u);
         juce::DropShadow (juce::Colours::black.withAlpha (0.55f), juce::roundToInt (20.0f * u), { 0, juce::roundToInt (8.0f * u) }).drawForPath (bg, card);
-        bg.setGradientFill (juce::ColourGradient (ui::deep2.withAlpha (0.96f), 0.0f, cardRect.getY(), ui::deep.withAlpha (0.98f), 0.0f, cardRect.getBottom(), false));
+        bg.setColour (ui::deep.withAlpha (0.94f));
+        bg.fillPath (card);
+        bg.setGradientFill (juce::ColourGradient (ui::lilac.withAlpha (0.04f), 0.0f, cardRect.getY(), ui::lilac.withAlpha (0.0f), 0.0f, cardRect.getY() + cardRect.getHeight() * 0.6f, false));
         bg.fillPath (card);
         bg.setColour (ui::line);
         bg.strokePath (card, juce::PathStrokeType (std::max (1.0f, u)));
-        // petits points de grille dans les coins de la carte
-        for (int cx = 0; cx < 2; ++cx)
-            for (int cy = 0; cy < 2; ++cy)
-                for (int i = 0; i < 3; ++i)
-                    for (int j = 0; j < 3 - i; ++j)
-                    {
-                        const float x = cx == 0 ? cardRect.getX() + (12.0f + 7.0f * (float) j) * u : cardRect.getRight() - (12.0f + 7.0f * (float) j) * u;
-                        const float y = cy == 0 ? (float) display.getBottom() + (14.0f + 7.0f * (float) i) * u : cardRect.getBottom() - (12.0f + 7.0f * (float) i) * u;
-                        bg.setColour (ui::line.withMultipliedAlpha (1.4f));
-                        bg.fillEllipse (juce::Rectangle<float> (2.4f * u, 2.4f * u).withCentre ({ x, y }));
-                    }
         if (logoScaled.isValid()) bg.drawImage (logoScaled, logoRect, juce::RectanglePlacement::stretchToFit);
     }
     g.setOpacity (1.0f);

@@ -55,8 +55,9 @@ target_sources(OniriqueRiser PRIVATE
     Source/PluginEditor.cpp
     Source/UIKit.cpp)
 
-# logo du site (sigil blanc), intégré au binaire
-juce_add_binary_data(OniriqueAssets SOURCES Resources/logo.png)
+# logo du site (sigil blanc) et polices de la charte (Unbounded, Hanken Grotesk, JetBrains Mono), intégrés au binaire
+juce_add_binary_data(OniriqueAssets SOURCES Resources/logo.png
+    Resources/Unbounded800.ttf Resources/HankenGrotesk600.ttf Resources/JetBrainsMono500.ttf Resources/JetBrainsMono600.ttf)
 
 target_include_directories(OniriqueRiser PRIVATE Source)
 
