@@ -2,6 +2,7 @@
 
 #include "UIKit.h"
 #include "PluginProcessor.h"
+#include "ui/OniriqueBar.h"
 
 // Le panneau de la montée : titre, la montée (braise) qui monte jusqu'à la voix, l'état de la capture, où poser le
 // fichier. En bas : LISTEN, LOOP, la vue FX / RAW, INPUT OPEN / CLOSED, EDIT.
@@ -137,7 +138,6 @@ private:
     OniriqueLookAndFeel lnf;
     juce::TooltipWindow tooltipWindow { this, 600 };
 
-    PresetBar presetBar { processor.presets };
     RiserDisplay display { processor };
 
     // le grand bouton : la durée de la montée
@@ -163,13 +163,13 @@ private:
     FxToggle sClean { "S-CLEAN" }, inSync { "IN SYNC" };
     FxMenu fxMenu { processor.apvts };   // réglages d'un effet (clic sur son nom)
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;
+    onirique::nuit::Bar bar;   // la barre du haut des plugins ONIRIQUE : presets, IN, A/B, menu
     float editAmt = 0.0f;
 
     std::vector<Animated*> animated;
-    juce::Image logo, logoScaled;
     juce::Image backdropLayer;
     float layersScale = 0.0f;
-    juce::Rectangle<float> logoRect, cardRect, knobLabel;
+    juce::Rectangle<float> cardRect, knobLabel;
     juce::String shownLength;
     bool restoringSize = true;
 

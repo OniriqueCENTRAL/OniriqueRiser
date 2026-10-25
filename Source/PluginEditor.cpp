@@ -7,7 +7,12 @@ using namespace onirique;
 namespace
 {
 constexpr float kBaseW = ui::kEditorBaseW, kBaseH = ui::kEditorBaseH;   // carré
-constexpr int kMinW = 440, kMaxW = 1100;
+constexpr int kMinW = 440, kMaxW = 1120;   // 1120 : 200 % (menu de la barre du haut)
+// la barre du haut, sur une seule rangée (sans marque : le nom est écrit dans le panneau de la montée) ; le haut de
+// l'ancien en-tête (logo, presets) passe sous elle
+constexpr float kBarH = 50.0f;      // bar.getBarHeight()
+constexpr float kHeaderCut = 46.0f;
+constexpr float kTotalH = kBarH + kBaseH - kHeaderCut;
 constexpr float kPi = juce::MathConstants<float>::pi;
 // rose pâle : la courbe de pré-fondu et ses repères (braise mêlée d'os)
 const juce::Colour kRose = ui::ember.interpolatedWith (ui::bone, 0.55f);
@@ -769,17 +774,18 @@ void FxMenu::paint (juce::Graphics& g)
 
 //==============================================================================
 OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRiserAudioProcessor& p)
-    : AudioProcessorEditor (&p), processor (p)
+    : AudioProcessorEditor (&p), processor (p),
+      bar (p.presets, p.apvts, "RISER", juce::ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize),
+           (int) kBaseW, (int) kBaseW)
 {
+    bar.setWithoutBrand();
+    jassert (bar.getBarHeight() == (int) kBarH);
     tooltipWindow.setLookAndFeel (&lnf);
     setLookAndFeel (&lnf);
     setOpaque (true);
-    logo = juce::ImageCache::getFromMemory (BinaryData::logo_png, BinaryData::logo_pngSize);
 
-    addAndMakeVisible (presetBar);
     addAndMakeVisible (display);
     display.onEdit = [this] (bool e) { showEdit (e); };
-    animated.push_back (&presetBar);
     animated.push_back (&display);
 
     // le grand bouton : REVERSE + durée
@@ -830,11 +836,16 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
         animated.push_back (a);
     spaceSel.setTitle ("SPACE");
 
-    const int w = onirique::window::openingSize (processor.apvts.state, "ONIRIQUE RISER", { 560, 560 }, { kMinW, kMinW }, { kMaxW, kMaxW }).x;
+    // la barre du haut : presets, IN, A/B, le menu (copier / coller, taille de la fenêtre)
+    addAndMakeVisible (bar);
+
+    auto heightFor = [] (int width) { return juce::roundToInt ((float) width * kTotalH / kBaseW); };
+    const int w = onirique::window::openingSize (processor.apvts.state, "ONIRIQUE RISER", { 560, heightFor (560) },
+                                                 { kMinW, heightFor (kMinW) }, { kMaxW, heightFor (kMaxW) }).x;
     setResizable (true, true);
-    setResizeLimits (kMinW, kMinW, kMaxW, kMaxW);
-    if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) (kBaseW / kBaseH));
-    setSize (w, juce::roundToInt ((float) w * kBaseH / kBaseW));
+    setResizeLimits (kMinW, heightFor (kMinW), kMaxW, heightFor (kMaxW));
+    if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) (kBaseW / kTotalH));
+    setSize (w, heightFor (w));
     restoringSize = false;
     onirique::window::remember (processor.apvts.state, getWidth(), getHeight());
 
@@ -849,6 +860,30 @@ OniriqueRiserAudioProcessorEditor::OniriqueRiserAudioProcessorEditor (OniriqueRi
         if (t.contains ("rawview")) if (auto* prm = processor.apvts.getParameter (ids::raw)) prm->setValueNotifyingHost (1.0f);
         if (t.contains ("closed")) if (auto* prm = processor.apvts.getParameter (ids::inputOpen)) prm->setValueNotifyingHost (0.0f);
         if (t.contains ("fxmenu")) juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<OniriqueRiserAudioProcessorEditor> (this)] { if (sp != nullptr && sp->tremolo.onText) sp->tremolo.onText(); });
+        // ONIRIQUE_UI_PNG=fichier.png : une image de l'interface (x2, moteur logiciel de JUCE), navigateur ou menu ouverts
+        if (const auto png = juce::SystemStats::getEnvironmentVariable ("ONIRIQUE_UI_PNG", {}); png.isNotEmpty())
+        {
+            juce::Component::SafePointer<OniriqueRiserAudioProcessorEditor> safe (this);
+            juce::Timer::callAfterDelay (1500, [safe, png, t]
+            {
+                if (safe == nullptr) return;
+                if (t.contains ("browser")) safe->bar.openBrowser();
+                if (t.contains ("menu")) safe->bar.openMenu();
+                juce::Timer::callAfterDelay (400, [safe, png]
+                {
+                    if (safe == nullptr) return;
+                    juce::Image img (juce::Image::ARGB, safe->getWidth() * 2, safe->getHeight() * 2, true, juce::SoftwareImageType());
+                    {
+                        juce::Graphics g2 (img);
+                        g2.addTransform (juce::AffineTransform::scale (2.0f));
+                        safe->paintEntireComponent (g2, true);
+                    }
+                    juce::File f (png);
+                    f.deleteFile();
+                    if (auto os = f.createOutputStream()) juce::PNGImageFormat().writeImageToStream (img, *os);
+                });
+            });
+        }
     }
    #endif
     addChildComponent (fxMenu);   // au-dessus de tout
@@ -905,12 +940,12 @@ void OniriqueRiserAudioProcessorEditor::resized()
     const float u = scale();
     const float W = (float) getWidth();
 
-    // ---- en-tête : logo, presets
-    logoRect = { 16.0f * u, 12.0f * u, 30.0f * u * 985.0f / 895.0f, 30.0f * u };
-    presetBar.setBounds (juce::Rectangle<float> (250.0f * u, 34.0f * u).withCentre ({ W * 0.5f, 27.0f * u }).toNearestInt());
+    // ---- la barre du haut (le haut de l'ancien en-tête, vide, passe sous elle)
+    bar.place (u, getLocalBounds());
+    const float oy = (kBarH - kHeaderCut) * u;
 
     // ---- la carte : le panneau de la montée, le grand bouton, les effets
-    cardRect = { 12.0f * u, 54.0f * u, W - 24.0f * u, (float) getHeight() - 66.0f * u };
+    cardRect = { 12.0f * u, oy + 54.0f * u, W - 24.0f * u, (float) getHeight() - oy - 66.0f * u };
     display.setBounds (juce::Rectangle<float> (cardRect.getX() + 10.0f * u, cardRect.getY() + 10.0f * u, cardRect.getWidth() - 20.0f * u, 200.0f * u).toNearestInt());
     const float top = (float) display.getBottom() + 8.0f * u;
     lengthKnob.setBounds (juce::Rectangle<float> (196.0f * u, 196.0f * u).withCentre ({ W * 0.5f, top + 104.0f * u }).toNearestInt());
@@ -935,12 +970,6 @@ void OniriqueRiserAudioProcessorEditor::resized()
         }
         sClean.setBounds (juce::Rectangle<float> (110.0f * u, 26.0f * u).withCentre ({ pw * 0.5f - 66.0f * u, 190.0f * u }).toNearestInt());
         inSync.setBounds (juce::Rectangle<float> (110.0f * u, 26.0f * u).withCentre ({ pw * 0.5f + 66.0f * u, 190.0f * u }).toNearestInt());
-    }
-
-    if (logo.isValid())
-    {
-        const int lh = juce::jlimit (16, 400, juce::roundToInt (logoRect.getHeight() * 2.0f));
-        logoScaled = logo.rescaled (juce::roundToInt ((float) lh * 985.0f / 895.0f), lh, juce::Graphics::highResamplingQuality);
     }
     if (! restoringSize)
         onirique::window::remember (processor.apvts.state, getWidth(), getHeight());
@@ -983,7 +1012,6 @@ void OniriqueRiserAudioProcessorEditor::paint (juce::Graphics& g)
         bg.fillPath (card);
         bg.setColour (ui::line);
         bg.strokePath (card, juce::PathStrokeType (std::max (1.0f, u)));
-        if (logoScaled.isValid()) bg.drawImage (logoScaled, logoRect, juce::RectanglePlacement::stretchToFit);
     }
     g.setOpacity (1.0f);
     g.drawImageTransformed (backdropLayer, juce::AffineTransform::scale (1.0f / layersScale));

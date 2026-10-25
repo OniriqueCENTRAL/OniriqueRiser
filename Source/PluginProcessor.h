@@ -4,7 +4,7 @@
 #include <juce_dsp/juce_dsp.h>
 
 #include "Parameters.h"
-#include "PresetManager.h"
+#include "StockPresets.h"
 #include "DSP/RiserEngine.h"
 
 /*  ONIRIQUE RISER : posé sur la piste de voix, il laisse passer le son tel quel.
@@ -60,7 +60,9 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     juce::AudioProcessorValueTreeState apvts;
-    onirique::PresetManager presets { apvts };
+    /** Les presets d'usine et ceux de l'utilisateur, la comparaison A/B : ce que montre la barre du haut. */
+    onirique::PresetBank presets { apvts, "Riser", onirique::riser::stockPresets(), onirique::riser::tagNames(),
+                                   onirique::riser::notStored() };
 
     //==============================================================================
     // Pour l'interface (thread de l'interface)

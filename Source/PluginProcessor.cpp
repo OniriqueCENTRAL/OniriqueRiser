@@ -66,6 +66,8 @@ OniriqueRiserAudioProcessor::OniriqueRiserAudioProcessor()
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "STATE", createLayout())
 {
+    apvts.state.setProperty ("preset", "Init", nullptr);   // l'état de départ : les valeurs par défaut
+    riser::importOldUserPresets (presets);
     renderThread = std::make_unique<RenderThread> (*this);
     startTimerHz (20);
 }
@@ -383,7 +385,9 @@ juce::AudioProcessorEditor* OniriqueRiserAudioProcessor::createEditor()
 
 void OniriqueRiserAudioProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    if (auto xml = apvts.copyState().createXml())
+    auto state = apvts.copyState();
+    presets.writeState (state);   // le côté A/B écouté, et l'autre
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, dest);
 }
 
@@ -392,8 +396,12 @@ void OniriqueRiserAudioProcessor::setStateInformation (const void* data, int siz
     if (auto xml = getXmlFromBinary (data, size))
         if (xml->hasTagName (apvts.state.getType()))
         {
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
-            presets.takeSnapshot();
+            auto state = juce::ValueTree::fromXml (*xml);
+            // un projet enregistré avec l'ancienne barre : le nom de son preset suit
+            if (! state.hasProperty ("preset") && state.hasProperty ("presetName"))
+                state.setProperty ("preset", state["presetName"], nullptr);
+            presets.readState (state);
+            apvts.replaceState (state);
         }
 }
 
