@@ -43,11 +43,12 @@ public:
     bool isMidiEffect() const override { return false; }
     // LISTEN et IN SYNC jouent la montée pendant que la piste n'envoie que du silence (DAW à l'arrêt, ou juste avant la
     // voix) : annoncée sans queue, le RISER était mis en veille par le DAW (Logic, Cubase…) dès que l'entrée se taisait,
-    // et LISTEN ne jouait rien. Queue infinie en VST2 / VST3 (prévu par ces formats) ; 30 s en AU (une queue infinie
-    // n'y est pas prévue), assez pour écouter la montée et sa voix après l'arrêt.
+    // et LISTEN ne jouait rien. Queue infinie en VST2 / VST3 (prévu par ces formats) ; 1 h en AU (une queue infinie
+    // n'y est pas prévue). 30 s ne suffisaient pas : Logic endormait le RISER 30 s après l'arrêt, et LISTEN pressé
+    // ensuite (le cas normal, le temps de régler la montée) ne jouait plus rien.
     double getTailLengthSeconds() const override
     {
-        return wrapperType == wrapperType_AudioUnit ? 30.0 : std::numeric_limits<double>::infinity();
+        return wrapperType == wrapperType_AudioUnit ? 3600.0 : std::numeric_limits<double>::infinity();
     }
 
     int getNumPrograms() override { return 1; }
