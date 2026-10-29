@@ -75,6 +75,7 @@ OniriqueRiserAudioProcessor::OniriqueRiserAudioProcessor()
 OniriqueRiserAudioProcessor::~OniriqueRiserAudioProcessor()
 {
     stopTimer();
+    preview.stop();
     renderThread.reset();
 }
 
@@ -133,6 +134,7 @@ void OniriqueRiserAudioProcessor::finishCapture()
 void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
+    lastBlockMs.store (juce::Time::getMillisecondCounter(), std::memory_order_relaxed);
     const int n = buffer.getNumSamples();
     const int inCh = getTotalNumInputChannels(), outCh = getTotalNumOutputChannels();
     for (int c = inCh; c < outCh; ++c) buffer.clear (c, 0, n);
@@ -237,31 +239,8 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
             for (int c = 0; c < numCh; ++c) buffer.addSample (c, i, g * res->riser.getSample (c, (int) j));
         }
     }
-    else if (usable && ! playing && listenOn.load())
-    {
-        // vue FX : la montée seule, ou (+ VOICE) la montée puis le début de la voix, enchaînés à l'échantillon près comme
-        // dans le DAW ; vue RAW : la partie de la prise choisie entre les poignées
-        const bool rawView = apvts.getRawParameterValue (ids::raw)->load() > 0.5f;
-        const auto& src = rawView ? res->sourceAudio : res->riser;
-        const int from = rawView ? 0 : res->padSamples;
-        const int main = juce::jmax (0, src.getNumSamples() - from);
-        const auto& voice = res->voiceAfter;
-        const int extra = ! rawView && listenVoice.load() ? voice.getNumSamples() : 0;
-        const int total = main + extra;
-        for (int i = 0; i < n; ++i)
-        {
-            if (listenIdx >= total)
-            {
-                if (! loop.load() || total == 0) { listenOn = false; break; }
-                listenIdx = 0;
-            }
-            for (int c = 0; c < numCh; ++c)
-                buffer.addSample (c, i, listenIdx < main ? src.getSample (juce::jmin (c, src.getNumChannels() - 1), from + listenIdx)
-                                                         : voice.getSample (juce::jmin (c, voice.getNumChannels() - 1), listenIdx - main));
-            ++listenIdx;
-        }
-        listenPos = main > 0 ? juce::jmin (1.0, (double) listenIdx / main) : 0.0;   // le curseur suit la montée
-    }
+    else if (usable && ! playing && listenOn.load() && ! previewOn.load())
+        playListen (buffer.getArrayOfWritePointers(), numCh, n, *res);
     else
         bypassMix.skip (n);
     if (! listenOn.load()) listenIdx = 0;
@@ -269,6 +248,48 @@ void OniriqueRiserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
     float pk = 0.0f;
     for (int c = 0; c < numCh; ++c) pk = std::max (pk, buffer.getMagnitude (c, 0, n));
     if (pk > level.load (std::memory_order_relaxed)) level.store (pk, std::memory_order_relaxed);
+}
+
+// LISTEN : ajoute la suite de l'écoute à out (thread audio du DAW, ou de l'écoute directe ; jamais les deux à la fois).
+// Vue FX : la montée seule, ou (+ VOICE) la montée puis le début de la voix, enchaînés à l'échantillon près comme dans le
+// DAW ; vue RAW : la partie de la prise choisie entre les poignées.
+void OniriqueRiserAudioProcessor::playListen (float* const* out, int numCh, int n, const RiserResult& res)
+{
+    const bool rawView = apvts.getRawParameterValue (ids::raw)->load() > 0.5f;
+    const auto& src = rawView ? res.sourceAudio : res.riser;
+    const int from = rawView ? 0 : res.padSamples;
+    const int main = juce::jmax (0, src.getNumSamples() - from);
+    const auto& voice = res.voiceAfter;
+    const int extra = ! rawView && listenVoice.load() ? voice.getNumSamples() : 0;
+    const int total = main + extra;
+    int idx = listenIdx.load();
+    for (int i = 0; i < n; ++i)
+    {
+        if (idx >= total)
+        {
+            if (! loop.load() || total == 0) { listenOn = false; break; }
+            idx = 0;
+        }
+        for (int c = 0; c < numCh; ++c)
+            out[c][i] += idx < main ? src.getSample (juce::jmin (c, src.getNumChannels() - 1), from + idx)
+                                    : voice.getSample (juce::jmin (c, voice.getNumChannels() - 1), idx - main);
+        ++idx;
+    }
+    listenIdx = idx;
+    listenPos = main > 0 ? juce::jmin (1.0, (double) idx / main) : 0.0;   // le curseur suit la montée
+}
+
+// écoute directe (thread de la file) : se tait dès que le DAW rappelle processBlock, qui reprend alors l'écoute
+void OniriqueRiserAudioProcessor::previewFill (float* const* out, int numCh, int n)
+{
+    if (! listenOn.load() || juce::Time::getMillisecondCounter() - lastBlockMs.load() < kHostIdleMs) return;
+    std::shared_ptr<const RiserResult> res;
+    {
+        const juce::SpinLock::ScopedTryLockType sl (lock);
+        if (sl.isLocked()) res = current;
+    }
+    if (res != nullptr && res->riser.getNumSamples() > 0 && std::abs (res->fs - preview.sampleRate()) < 0.5)
+        playListen (out, numCh, n, *res);
 }
 
 RiserSettings OniriqueRiserAudioProcessor::readSettings() const
@@ -355,6 +376,19 @@ void OniriqueRiserAudioProcessor::timerCallback()
             renderPending = true;
             renderThread->request (t, readSettings());
         }
+    }
+
+    // écoute directe : LISTEN alors que le DAW ne fait plus tourner le plugin (Logic à l'arrêt, piste audio sans le
+    // bouton I) ; elle s'arrête à la fin de l'écoute, ou quand le DAW rappelle processBlock
+    const bool hostIdle = juce::Time::getMillisecondCounter() - lastBlockMs.load() >= kHostIdleMs;
+    const auto res = result();
+    const bool want = listenOn.load() && hostIdle && res != nullptr && res->riser.getNumSamples() > 0;
+    if (want && (! preview.isRunning() || std::abs (preview.sampleRate() - res->fs) > 0.5))
+        previewOn = preview.start (res->fs);
+    else if (! want && preview.isRunning())
+    {
+        preview.stop();
+        previewOn = false;
     }
 }
 

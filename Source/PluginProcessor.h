@@ -6,6 +6,7 @@
 #include "Parameters.h"
 #include "StockPresets.h"
 #include "DSP/RiserEngine.h"
+#include "DirectPreview.h"
 
 /*  ONIRIQUE RISER : posé sur la piste de voix, il laisse passer le son tel quel.
 
@@ -43,12 +44,12 @@ public:
     bool isMidiEffect() const override { return false; }
     // LISTEN et IN SYNC jouent la montée pendant que la piste n'envoie que du silence (DAW à l'arrêt, ou juste avant la
     // voix) : annoncée sans queue, le RISER était mis en veille par le DAW (Logic, Cubase…) dès que l'entrée se taisait,
-    // et LISTEN ne jouait rien. Queue infinie en VST2 / VST3 (prévu par ces formats) ; 1 h en AU (une queue infinie
-    // n'y est pas prévue). 30 s ne suffisaient pas : Logic endormait le RISER 30 s après l'arrêt, et LISTEN pressé
-    // ensuite (le cas normal, le temps de régler la montée) ne jouait plus rien.
+    // et LISTEN ne jouait rien. Queue infinie en VST2 / VST3 (prévu par ces formats) ; 30 s en AU (une queue infinie
+    // n'y est pas prévue), assez pour écouter la montée et sa voix après l'arrêt. Sur une piste audio sans le bouton I,
+    // Logic ne fait plus tourner le plugin à l'arrêt, queue ou pas : LISTEN passe alors par l'écoute directe (preview).
     double getTailLengthSeconds() const override
     {
-        return wrapperType == wrapperType_AudioUnit ? 3600.0 : std::numeric_limits<double>::infinity();
+        return wrapperType == wrapperType_AudioUnit ? 30.0 : std::numeric_limits<double>::infinity();
     }
 
     int getNumPrograms() override { return 1; }
@@ -95,6 +96,7 @@ public:
 
 private:
     void timerCallback() override;
+    void playListen (float* const* out, int numCh, int n, const onirique::RiserResult& res);
     onirique::RiserSettings readSettings() const;
     void finishCapture();
 
@@ -129,7 +131,16 @@ private:
     // écoute dans le plugin
     std::atomic<bool> listenOn { false };
     std::atomic<double> listenPos { 0.0 };
-    int listenIdx = 0;
+    std::atomic<int> listenIdx { 0 };
+
+    // écoute directe : quand le DAW n'appelle plus processBlock (Logic à l'arrêt, piste audio sans le bouton I), LISTEN
+    // sort par la sortie audio du Mac. Un seul des deux joue à la fois : processBlock se tait pendant l'écoute directe,
+    // et l'écoute directe se tait dès que le DAW rappelle processBlock.
+    static constexpr juce::uint32 kHostIdleMs = 250;
+    std::atomic<juce::uint32> lastBlockMs { 0 };
+    std::atomic<bool> previewOn { false };
+    DirectPreview preview { [this] (float* const* out, int numCh, int n) { previewFill (out, numCh, n); } };
+    void previewFill (float* const* out, int numCh, int n);
 
     std::atomic<float> level { 0.0f };
     juce::SmoothedValue<float> bypassMix;

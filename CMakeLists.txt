@@ -53,7 +53,8 @@ juce_add_plugin(OniriqueRiser
 target_sources(OniriqueRiser PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
-    Source/UIKit.cpp)
+    Source/UIKit.cpp
+    Source/DirectPreview.cpp)
 
 # logo du site (sigil blanc) et polices de la charte (Unbounded, Hanken Grotesk, JetBrains Mono), intégrés au binaire
 juce_add_binary_data(OniriqueAssets SOURCES Resources/logo.png
