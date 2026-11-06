@@ -164,6 +164,7 @@ private:
     FxMenu fxMenu { processor.apvts };   // réglages d'un effet (clic sur son nom)
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> attachments;
     onirique::nuit::Bar bar;   // la barre du haut des plugins ONIRIQUE : presets, IN, A/B, menu
+    int themeSeen = -1;   // la couleur de l'interface déjà dessinée (OniriqueTheme.h)
     float editAmt = 0.0f;
 
     std::vector<Animated*> animated;

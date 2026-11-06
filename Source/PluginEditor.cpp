@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "OniriqueDA.h"
 #include "OniriqueWindowSize.h"
 #include <BinaryData.h>
 
@@ -909,6 +910,13 @@ void OniriqueRiserAudioProcessorEditor::showEdit (bool e)
 
 void OniriqueRiserAudioProcessorEditor::timerCallback()
 {
+    // la couleur de l'interface (menu ⋯, ou changée dans un autre plugin ONIRIQUE) : caches vidés, tout se redessine
+    if (onirique::look::changedSince (themeSeen))
+    {
+        backdropLayer = {};
+        std::function<void (juce::Component&)> all = [&all] (juce::Component& k) { k.repaint(); for (auto* ch : k.getChildren()) all (*ch); };
+        all (*this);
+    }
     for (auto* a : animated) a->tick();
 
     // grand bouton : l'aiguille et la couronne suivent la valeur (le dessin du potard lit "shown")
@@ -988,30 +996,9 @@ void OniriqueRiserAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Graphics bg (backdropLayer);
         bg.addTransform (juce::AffineTransform::scale (ps));
         const float W = (float) getWidth(), H = (float) getHeight();
-        // DA PRO SERIES : noir profond, lueurs rouges très discrètes, grain fin, carte de verre sombre
-        bg.fillAll (ui::night);
-        bg.setGradientFill (juce::ColourGradient (ui::blood.withAlpha (0.55f), W * 0.3f, H * 0.42f, ui::night.withAlpha (0.0f), W * 0.3f + W * 0.75f, H * 0.42f, true));
-        bg.fillRect (getLocalBounds());
-        bg.setGradientFill (juce::ColourGradient (ui::blood.withAlpha (0.22f), W * 0.92f, H * 1.05f, ui::night.withAlpha (0.0f), W * 0.92f - W * 0.6f, H * 1.05f, true));
-        bg.fillRect (getLocalBounds());
-        {
-            juce::Random rnd (21);
-            for (int i = 0; i < 70; ++i)
-            {
-                const float x = rnd.nextFloat() * W, y = rnd.nextFloat() * H, s = (0.5f + 1.2f * rnd.nextFloat() * rnd.nextFloat()) * u;
-                bg.setColour (ui::mist.withAlpha (0.03f + 0.07f * rnd.nextFloat()));
-                bg.fillEllipse (x, y, s, s);
-            }
-        }
-        juce::Path card;
-        card.addRoundedRectangle (cardRect, 14.0f * u);
-        juce::DropShadow (juce::Colours::black.withAlpha (0.55f), juce::roundToInt (20.0f * u), { 0, juce::roundToInt (8.0f * u) }).drawForPath (bg, card);
-        bg.setColour (ui::deep.withAlpha (0.94f));
-        bg.fillPath (card);
-        bg.setGradientFill (juce::ColourGradient (ui::lilac.withAlpha (0.04f), 0.0f, cardRect.getY(), ui::lilac.withAlpha (0.0f), 0.0f, cardRect.getY() + cardRect.getHeight() * 0.6f, false));
-        bg.fillPath (card);
-        bg.setColour (ui::line);
-        bg.strokePath (card, juce::PathStrokeType (std::max (1.0f, u)));
+        // la DA ONIRIQUE (celle de VOCALBOX) : nuit et taches de braise floues, carte de verre liquide
+        bg.drawImageAt (onirique::da::backdrop (getWidth(), getHeight(), u), 0, 0);
+        onirique::da::glass (bg, cardRect, 22.0f * u, u, true);
     }
     g.setOpacity (1.0f);
     g.drawImageTransformed (backdropLayer, juce::AffineTransform::scale (1.0f / layersScale));
